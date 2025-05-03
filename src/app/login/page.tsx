@@ -53,7 +53,7 @@ export default function LoginPage() {
         description: 'Welcome back to OnlyFly.',
       });
       login(); // Update authentication state
-      router.push('/matches'); // Redirect user to matches page on success
+      router.push('/'); // Redirect user to homepage on success
       // form.reset(); // Reset form removed, as we are redirecting
     } else {
        toast({

@@ -23,22 +23,23 @@ export function Header() {
           <span className="font-bold sm:inline-block">OnlyFly</span>
         </Link>
         <nav className="flex flex-1 items-center space-x-2 md:space-x-4 justify-end">
-          {/* Always visible links */}
-          <Link href="/matches">
-             <Button variant="ghost" size="sm" className="px-2 md:px-4">Find Swaps</Button>
-          </Link>
-           <Link href="/groups">
-             <Button variant="ghost" size="sm" className="px-2 md:px-4">Groups</Button>
-          </Link>
-
-          {/* Conditional links */}
+          {/* Conditional links based on authentication */}
           {isAuthenticated ? (
-            <Button onClick={handleLogout} variant="outline" size="sm" className="px-2 md:px-4">
-              <LogOut className="mr-0 md:mr-2 h-4 w-4" />
-              <span className="hidden md:inline">Sign Out</span>
-            </Button>
+            <>
+              <Link href="/matches">
+                 <Button variant="ghost" size="sm" className="px-2 md:px-4">Find Swaps</Button>
+              </Link>
+               <Link href="/groups">
+                 <Button variant="ghost" size="sm" className="px-2 md:px-4">Groups</Button>
+              </Link>
+              <Button onClick={handleLogout} variant="outline" size="sm" className="px-2 md:px-4">
+                <LogOut className="mr-0 md:mr-2 h-4 w-4" />
+                <span className="hidden md:inline">Sign Out</span>
+              </Button>
+            </>
           ) : (
             <>
+              {/* Logged-out users only see Log In and Sign Up */}
               <Link href="/login">
                 <Button variant="ghost" size="sm" className="px-2 md:px-4">Log In</Button>
               </Link>

@@ -21,10 +21,10 @@ export function middleware(request: NextRequest) {
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route)); // Check if route starts with a protected path
 
   // If the user is authenticated and trying to access an auth route (login/register),
-  // redirect them to a default authenticated page (e.g., /matches)
+  // redirect them to the homepage (/)
   if (isAuthenticated && isAuthRoute) {
-    console.log(`Authenticated user accessing auth route ${pathname}, redirecting to /matches`);
-    return NextResponse.redirect(new URL('/matches', request.url));
+    console.log(`Authenticated user accessing auth route ${pathname}, redirecting to /`);
+    return NextResponse.redirect(new URL('/', request.url));
   }
 
   // If the user is not authenticated and trying to access a protected route,
@@ -38,7 +38,7 @@ export function middleware(request: NextRequest) {
   }
 
   // Allow the request to proceed if none of the above conditions are met
-  console.log(`Allowing request to ${pathname}`);
+  // console.log(`Allowing request to ${pathname}`); // Commented out for less console noise
   return NextResponse.next();
 }
 
