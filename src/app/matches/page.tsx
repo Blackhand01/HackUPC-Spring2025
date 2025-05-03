@@ -15,7 +15,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send } from 'lucide-react'; // Renamed Users icon to UsersIcon to avoid conflict with User type
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed } from 'lucide-react'; // Added LocateFixed icon
 import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -43,6 +43,7 @@ interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
+  departureCity: string; // Added departure city
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
   dateRange?: { start: Timestamp; end: Timestamp } | null;
   durationDays?: number;
@@ -79,6 +80,7 @@ const MAX_DURATION_DAYS = 30;
 const travelFormSchema = z.object({
   tripType: z.enum(['individual', 'group'], { required_error: "Please select a trip type."}),
   groupId: z.string().optional(), // Required if tripType is 'group'
+  departureCity: z.string().min(2, "Departure city is required."), // Added departure city validation
   // Mode 1: Guided Sliders
   mood: z.string().optional(), // Optional now, validation inside refine if mode is guided
   activity: z.string().optional(), // Optional now
@@ -109,7 +111,7 @@ const travelFormSchema = z.object({
     message: "Please specify the 'other' activity.",
     path: ["activityOther"],
 }).refine(data => {
-    // If mode is 'guided', require at least one planning input
+    // If mode is 'guided', require at least one planning input (Mood/Activity/Duration/Dates)
     if (data.planningMode === 'guided') {
         const hasMood = !!data.mood;
         const hasActivity = !!data.activity;
@@ -171,6 +173,7 @@ export default function MyTravelsPage() {
     defaultValues: {
       tripType: 'individual', // Default to individual
       groupId: undefined,
+      departureCity: '', // Default empty departure city
       mood: MOOD_OPTIONS[0].value, // Default mood
       activity: ACTIVITY_OPTIONS[0].value, // Default activity
       activityOther: '',
@@ -273,6 +276,7 @@ export default function MyTravelsPage() {
        const travelToAdd: Omit<Travel, 'id'> = {
         userId: data.tripType === 'individual' ? user.uid : null,
         groupId: data.tripType === 'group' ? data.groupId! : null,
+        departureCity: data.departureCity, // Add departure city
         preferences: preferences,
         dateRange: data.startDate && data.endDate ? {
             start: Timestamp.fromDate(data.startDate),
@@ -302,6 +306,7 @@ export default function MyTravelsPage() {
       form.reset({
           tripType: 'individual',
           groupId: undefined,
+          departureCity: '', // Reset departure city
           mood: MOOD_OPTIONS[0].value,
           activity: ACTIVITY_OPTIONS[0].value,
           activityOther: '',
@@ -401,6 +406,7 @@ export default function MyTravelsPage() {
             console.log("AI Extracted Data:", aiOutput.extractedData);
             if (aiOutput.extractedData) {
                  const { mood, activity, activityOther, durationDays, startDate, endDate } = aiOutput.extractedData;
+                 // TODO: Add departureCity extraction if needed in AI flow
 
                 if (mood) {
                     const moodOption = MOOD_OPTIONS.find(opt => opt.value === mood);
@@ -558,7 +564,7 @@ export default function MyTravelsPage() {
                         name="tripType"
                         render={({ field }) => (
                             <FormItem className="space-y-3">
-                                <FormLabel className="text-lg font-semibold">Trip Type</FormLabel>
+                                <FormLabel className="text-base font-semibold">Trip Type</FormLabel>
                                 <FormControl>
                                     <RadioGroup
                                         onValueChange={(value) => {
@@ -599,7 +605,7 @@ export default function MyTravelsPage() {
                             name="groupId"
                             render={({ field }) => (
                                 <FormItem>
-                                    <FormLabel className="text-lg font-semibold">Select Group</FormLabel>
+                                    <FormLabel className="text-base font-semibold">Select Group</FormLabel>
                                     <Select
                                         onValueChange={field.onChange}
                                         value={field.value}
@@ -634,13 +640,29 @@ export default function MyTravelsPage() {
                         />
                     )}
 
+                    {/* Departure City */}
+                     <FormField
+                        control={form.control}
+                        name="departureCity"
+                        render={({ field }) => (
+                            <FormItem>
+                                <FormLabel className="text-base font-semibold flex items-center gap-1"><LocateFixed className="h-5 w-5"/>Departure City</FormLabel>
+                                <FormControl>
+                                    <Input placeholder="e.g., Rome, London, New York" {...field} disabled={isSubmitting} />
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
+                        )}
+                     />
+
+
                     {/* Emotional Planning Section (Tabs) */}
                     <FormField
                         control={form.control}
                         name="planningMode"
                         render={({ field }) => (
                             <FormItem className="mt-2 border-t pt-6">
-                                 <FormLabel className="text-lg font-semibold mb-3 block">Trip Preferences</FormLabel>
+                                 <FormLabel className="text-base font-semibold mb-3 block">Trip Preferences</FormLabel>
                                 <FormControl>
                                     <Tabs value={field.value} onValueChange={field.onChange} className="w-full">
                                          <TabsList className="grid w-full grid-cols-2">
@@ -654,7 +676,7 @@ export default function MyTravelsPage() {
                                              <FormField
                                                 control={form.control}
                                                 name="mood"
-                                                render={({ field }) => (
+                                                render={({ field: moodField }) => ( // Renamed field to avoid conflict
                                                     <FormItem>
                                                         <FormLabel className="flex items-center gap-1 text-base font-semibold"><Smile className="h-5 w-5"/>Mood</FormLabel>
                                                         <FormControl>
@@ -689,7 +711,7 @@ export default function MyTravelsPage() {
                                             <FormField
                                                 control={form.control}
                                                 name="activity"
-                                                render={({ field }) => (
+                                                render={({ field: activityField }) => ( // Renamed field
                                                      <FormItem>
                                                         <FormLabel className="flex items-center gap-1 text-base font-semibold"><Mountain className="h-5 w-5"/>Activity</FormLabel>
                                                          <FormControl>
@@ -719,13 +741,13 @@ export default function MyTravelsPage() {
                                                              <FormField
                                                                 control={form.control}
                                                                 name="activityOther"
-                                                                render={({ field }) => (
+                                                                render={({ field: otherField }) => ( // Renamed field
                                                                     <FormItem className="px-4 space-y-1 pt-2">
                                                                          <FormLabel>Describe "Other" Activity</FormLabel>
                                                                          <FormControl>
                                                                              <Input
                                                                                 placeholder="e.g., Volunteering, Language course"
-                                                                                {...field}
+                                                                                {...otherField}
                                                                                 disabled={isSubmitting}
                                                                             />
                                                                         </FormControl>
@@ -746,7 +768,7 @@ export default function MyTravelsPage() {
                                                      <FormField
                                                         control={form.control}
                                                         name="startDate"
-                                                        render={({ field }) => (
+                                                        render={({ field: startDateField }) => ( // Renamed field
                                                             <FormItem className="flex flex-col space-y-2">
                                                                 <FormLabel>Start Date</FormLabel>
                                                                 <Popover>
@@ -756,20 +778,20 @@ export default function MyTravelsPage() {
                                                                                 variant={"outline"}
                                                                                 className={cn(
                                                                                     "w-full justify-start text-left font-normal",
-                                                                                    !field.value && "text-muted-foreground"
+                                                                                    !startDateField.value && "text-muted-foreground"
                                                                                 )}
                                                                                 disabled={isSubmitting}
                                                                             >
                                                                                 <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                                                {startDateField.value ? format(startDateField.value, "PPP") : <span>Pick a date</span>}
                                                                             </Button>
                                                                         </FormControl>
                                                                     </PopoverTrigger>
                                                                     <PopoverContent className="w-auto p-0">
                                                                          <ShadCalendar
                                                                             mode="single"
-                                                                            selected={field.value ?? undefined}
-                                                                            onSelect={(date) => handleDateChange(date, field)} // Pass field object
+                                                                            selected={startDateField.value ?? undefined}
+                                                                            onSelect={(date) => handleDateChange(date, startDateField)} // Pass field object
                                                                             initialFocus
                                                                         />
                                                                     </PopoverContent>
@@ -781,7 +803,7 @@ export default function MyTravelsPage() {
                                                      <FormField
                                                         control={form.control}
                                                         name="endDate"
-                                                        render={({ field }) => (
+                                                        render={({ field: endDateField }) => ( // Renamed field
                                                             <FormItem className="flex flex-col space-y-2">
                                                                 <FormLabel>End Date</FormLabel>
                                                                 <Popover>
@@ -791,20 +813,20 @@ export default function MyTravelsPage() {
                                                                                 variant={"outline"}
                                                                                 className={cn(
                                                                                     "w-full justify-start text-left font-normal",
-                                                                                    !field.value && "text-muted-foreground"
+                                                                                    !endDateField.value && "text-muted-foreground"
                                                                                 )}
                                                                                 disabled={isSubmitting || !form.watch('startDate')}
                                                                             >
                                                                                 <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                                                {endDateField.value ? format(endDateField.value, "PPP") : <span>Pick a date</span>}
                                                                             </Button>
                                                                         </FormControl>
                                                                     </PopoverTrigger>
                                                                     <PopoverContent className="w-auto p-0">
                                                                          <ShadCalendar
                                                                             mode="single"
-                                                                            selected={field.value ?? undefined}
-                                                                            onSelect={(date) => handleDateChange(date, field)} // Pass field object
+                                                                            selected={endDateField.value ?? undefined}
+                                                                            onSelect={(date) => handleDateChange(date, endDateField)} // Pass field object
                                                                             disabled={(date) =>
                                                                                 form.watch('startDate') ? date < form.watch('startDate')! : false
                                                                             }
@@ -820,7 +842,7 @@ export default function MyTravelsPage() {
                                                  <FormField
                                                     control={form.control}
                                                     name="durationDays"
-                                                    render={({ field }) => (
+                                                    render={({ field: durationField }) => ( // Renamed field
                                                          <FormItem className="pt-4 space-y-3">
                                                              <FormLabel className="text-center block text-sm text-muted-foreground">Or select approximate duration</FormLabel>
                                                              <FormControl>
@@ -882,7 +904,7 @@ export default function MyTravelsPage() {
                                                 {/* AI Input - no need for FormField as it's handled separately */}
                                                  <div className="flex items-center gap-2">
                                                      <Textarea
-                                                         placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week')"
+                                                         placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week from Rome')"
                                                          value={currentUserInput}
                                                          onChange={handleAiInputChange}
                                                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiSubmit(); } }}
@@ -967,6 +989,10 @@ export default function MyTravelsPage() {
                     <CardDescription>
                         Created: {formattedCreatedAt}
                     </CardDescription>
+                    <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
+                        <LocateFixed className="h-4 w-4"/>
+                         Departing from: <span className="font-medium text-foreground">{travel.departureCity}</span>
+                    </p>
                      {(formattedStartDate && formattedEndDate) ? (
                         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
                             <Calendar className="h-4 w-4"/>

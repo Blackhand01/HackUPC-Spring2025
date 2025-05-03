@@ -1,3 +1,4 @@
+
 // src/app/groups/page.tsx
 'use client';
 
@@ -15,7 +16,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, PlusCircle, Users, Link as LinkIcon, Share2, PlaneTakeoff, Calendar, Heart, MapPin, Smile, Mountain, Film, Utensils, Leaf, CalendarDays } from 'lucide-react'; // Added emotional planning icons
+import { Loader2, PlusCircle, Users, Link as LinkIcon, Share2, PlaneTakeoff, Calendar, Heart, MapPin, Smile, Mountain, Film, Utensils, Leaf, CalendarDays, Info, LocateFixed } from 'lucide-react'; // Added LocateFixed icon
 import { CopyToClipboard } from '@/components/functional/CopyToClipboard';
 import { format } from 'date-fns';
 
@@ -38,6 +39,7 @@ interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
+  departureCity: string; // Added departure city
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
   dateRange?: { start: Timestamp; end: Timestamp } | null;
   durationDays?: number;
@@ -441,6 +443,10 @@ export default function GroupsPage() {
                                         <div key={travel.id} className="border p-3 rounded-md bg-secondary/50">
                                             <p className="text-sm font-medium text-secondary-foreground mb-1.5">Trip Plan <span className="font-mono text-xs bg-background px-1 py-0.5 rounded">#{travel.id?.substring(0, 6)}</span></p>
                                             <div className="space-y-1 text-xs text-muted-foreground">
+                                                <p className="flex items-center gap-1">
+                                                     <LocateFixed className="h-3 w-3"/>
+                                                     Departing from: <span className="font-medium text-foreground">{travel.departureCity}</span>
+                                                 </p>
                                                 {travel.dateRange ? (
                                                     <p className="flex items-center gap-1">
                                                         <Calendar className="h-3 w-3"/>
@@ -485,11 +491,11 @@ export default function GroupsPage() {
                              </div>
                          )}
                     </CardContent>
-                    {/* <CardFooter className="flex justify-end pt-4 border-t mt-4">
-                         <Button variant="secondary" size="sm" onClick={() => router.push(`/travels/new?groupId=${group.id}`)}>
+                     <CardFooter className="flex justify-end pt-4 border-t mt-4">
+                         <Button variant="secondary" size="sm" onClick={() => router.push(`/matches?groupId=${group.id}`)}> {/* Changed href to /matches */}
                               <PlusCircle className="mr-2 h-4 w-4" /> Plan Trip for Group
                          </Button>
-                    </CardFooter> */}
+                    </CardFooter>
                 </Card>
                 )
             })}
