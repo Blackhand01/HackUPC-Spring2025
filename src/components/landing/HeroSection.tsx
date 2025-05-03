@@ -1,3 +1,4 @@
+
 import Link from 'next/link';
 import Image from 'next/image';
 import { Button } from '@/components/ui/button';
@@ -9,7 +10,7 @@ export function HeroSection() {
         src="https://picsum.photos/1600/900"
         alt="Beautiful travel destination"
         fill // Changed layout to fill for better responsiveness
-        objectFit="cover"
+        style={{objectFit: 'cover'}} // Changed objectFit to style prop
         className="opacity-40" // Slightly increased opacity for better visibility of text
         priority
         data-ai-hint="travel destination landscape"
