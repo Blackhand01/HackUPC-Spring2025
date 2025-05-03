@@ -30,36 +30,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow';
 import { findDestinationMatches, type FindDestinationMatchesInput, type FindDestinationMatchesOutput, type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow'; // Import destination matching flow
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
-
-// Interfaces (consider moving to a shared types file)
-interface Place {
-  name: string;
-  coordinate?: { lat: number | null; lng: number | null };
-  country: string;
-}
-
-interface Travel {
-  id?: string; // Firestore document ID
-  groupId: string | null;
-  userId: string | null;
-  departureCity: string;
-  preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
-  dateRange?: { start: Timestamp; end: Timestamp } | null;
-  durationDays?: number;
-  places?: Place[]; // Candidate or selected places
-  createdAt: Timestamp;
-  updatedAt?: Timestamp; // Add updatedAt timestamp
-  // --- Added fields for destination matching ---
-  destinationMatches?: EnrichedDestination[]; // Store ranked results
-  destinationMatchesStatus?: 'pending' | 'processing' | 'completed' | 'error';
-  destinationMatchesError?: string;
-  lastMatchedAt?: Timestamp;
-}
-
-interface Group {
-  id: string;
-  groupName: string;
-}
+import { type Travel, type Group, type Place } from '@/types'; // Import shared types
 
 // --- Emotional Planning Constants ---
 const MOOD_OPTIONS = [
@@ -109,20 +80,6 @@ const travelFormSchema = z.object({
     return true;
 }, { message: "Please specify the 'other' activity.", path: ["activityOther"]})
 .refine(data => {
-    if (data.planningMode === 'guided') {
-        const hasMood = !!data.mood;
-        const hasActivity = !!data.activity;
-        const hasDurationDays = data.durationDays !== undefined && data.durationDays !== null && data.durationDays > 0;
-        const hasDateRange = data.startDate !== undefined && data.startDate !== null && data.endDate !== undefined && data.endDate !== null;
-        return hasMood || hasActivity || hasDurationDays || hasDateRange;
-    }
-    return true;
-}, { message: "Please provide at least one preference (Mood, Activity, Duration/Dates) in Guided mode.", path: ["mood"]})
-.refine(data => {
-    if (data.startDate && data.endDate) return data.endDate >= data.startDate;
-    return true;
-}, { message: "End date must be on or after the start date.", path: ["endDate"]})
-.refine(data => {
     // Require date range for destination matching
     return !!data.startDate && !!data.endDate;
 }, { message: "Please select both a start and end date for destination matching.", path: ["startDate"] });
@@ -170,12 +127,13 @@ export default function MyTravelsPage() {
       mood: MOOD_OPTIONS[0].value,
       activity: ACTIVITY_OPTIONS[0].value,
       activityOther: '',
-      durationDays: 5,
+      // durationDays: 5, // Duration is now derived from dates or explicitly set if dates are null
       startDate: null,
       endDate: null,
       aiPrompt: '',
       planningMode: 'guided',
     },
+    mode: 'onChange', // Validate on change for better feedback
   });
 
   // --- Effect for Authentication Check ---
@@ -192,6 +150,7 @@ export default function MyTravelsPage() {
         setLoadingTravels(true);
         try {
           const travelsCollection = collection(db, 'travels');
+          // Query for individual travels (userId matches, groupId is null)
           const q = query(travelsCollection, where('userId', '==', user.uid), where('groupId', '==', null));
           const querySnapshot = await getDocs(q);
           const travelsList = querySnapshot.docs.map(doc => ({
@@ -274,7 +233,7 @@ export default function MyTravelsPage() {
         lastMatchedAt: Timestamp.now(),
       });
       // Optionally update local state immediately for better UX
-       setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatchesStatus: 'processing' } : t));
+       setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatchesStatus: 'processing', lastMatchedAt: Timestamp.now() } : t));
     } catch (error) {
        console.error("Error updating travel status to processing:", error);
        toast({ variant: 'destructive', title: 'Matching Error', description: 'Failed to start the matching process.' });
@@ -341,60 +300,81 @@ export default function MyTravelsPage() {
         toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to add a travel plan.' });
         return;
     }
+    // Ensure dates are selected
     if (!data.startDate || !data.endDate) {
          toast({ variant: 'destructive', title: 'Missing Dates', description: 'Please select both a start and end date.' });
          return;
     }
     setIsSubmitting(true);
+    console.log("Submitting Travel Form Data:", data); // Log form data
 
     const preferences: string[] = [];
     if (data.mood) preferences.push(`mood:${data.mood}`);
     if (data.activity === 'other' && data.activityOther) {
-        preferences.push(`activity:other:${data.activityOther}`);
-    } else if (data.activity) {
+        preferences.push(`activity:other:${data.activityOther.trim()}`);
+    } else if (data.activity && data.activity !== 'other') {
         preferences.push(`activity:${data.activity}`);
     }
 
     let newTravelDocId: string | null = null; // To store the ID of the newly created doc
 
     try {
+       // Ensure dates are valid before creating Timestamp
+       const startDate = data.startDate instanceof Date ? data.startDate : null;
+       const endDate = data.endDate instanceof Date ? data.endDate : null;
+
+       if (!startDate || !endDate) {
+           throw new Error("Invalid date format submitted.");
+       }
+
        const travelToAdd: Omit<Travel, 'id'> = {
         userId: data.tripType === 'individual' ? user.uid : null,
         groupId: data.tripType === 'group' ? data.groupId! : null,
-        departureCity: data.departureCity,
+        departureCity: data.departureCity, // Save departure city
         preferences: preferences,
-        dateRange: data.startDate && data.endDate ? {
-            start: Timestamp.fromDate(data.startDate),
-            end: Timestamp.fromDate(data.endDate)
-        } : null,
-        durationDays: (data.startDate && data.endDate) ? undefined : data.durationDays,
-        places: [],
+        dateRange: { // Use validated dates
+            start: Timestamp.fromDate(startDate),
+            end: Timestamp.fromDate(endDate)
+        },
+        // durationDays is derived from dateRange, no need to store if dateRange exists
+        durationDays: undefined, // Explicitly set to undefined when dates are present
+        places: [], // Initialize places as empty array
         createdAt: Timestamp.now(),
-        updatedAt: Timestamp.now(),
-        destinationMatchesStatus: 'pending', // Initial status
+        updatedAt: Timestamp.now(), // Set updatedAt on creation
+        destinationMatchesStatus: 'pending', // Initial status for matching
+        // Other fields like destinationMatches, destinationMatchesError, lastMatchedAt are initially null/undefined
       };
+
+      console.log("Data being sent to Firestore:", travelToAdd); // Log data before sending
 
       const docRef = await addDoc(collection(db, 'travels'), travelToAdd);
       newTravelDocId = docRef.id; // Store the new ID
 
       toast({
         title: 'Travel Plan Added!',
-        description: `Your new ${data.tripType} travel plan has been saved. Finding matches...`,
+        description: `Your new ${data.tripType} travel plan has been saved. ${data.tripType === 'individual' ? 'Finding matches...' : ''}`,
       });
 
-        const newTravelData = { ...travelToAdd, id: newTravelDocId, createdAt: travelToAdd.createdAt, updatedAt: travelToAdd.updatedAt };
-
+      const newTravelData: Travel = {
+          ...travelToAdd,
+          id: newTravelDocId,
+          dateRange: travelToAdd.dateRange, // Ensure dateRange is correctly passed
+          createdAt: travelToAdd.createdAt,
+          updatedAt: travelToAdd.updatedAt,
+      };
 
        if (data.tripType === 'individual') {
             setMyIndividualTravels(prev => [...prev, newTravelData]);
              // Trigger matching immediately after creation for individual trips
             triggerDestinationMatching(newTravelData);
        } else {
-           // Group trips are handled on the groups page, no immediate matching here.
-           router.push('/groups');
+           // For group trips, redirect to the groups page where the trip will be listed.
+           toast({ title: 'Group Trip Added', description: 'The new trip plan is now associated with the group.' });
+           router.push('/groups'); // Redirect to groups page after adding a group trip
        }
 
 
+      // Reset form to default values after successful submission
       form.reset({
           tripType: 'individual',
           groupId: undefined,
@@ -403,15 +383,15 @@ export default function MyTravelsPage() {
           mood: MOOD_OPTIONS[0].value,
           activity: ACTIVITY_OPTIONS[0].value,
           activityOther: '',
-          durationDays: 5,
           startDate: null,
           endDate: null,
           aiPrompt: '',
           planningMode: 'guided',
+          durationDays: undefined, // Reset durationDays as well
       });
       setMoodSliderValue(0);
       setActivitySliderValue(0);
-      setDurationSliderValue([5]);
+      setDurationSliderValue([5]); // Reset slider visually if needed, but it's not used for saving when dates exist
       setChatHistory([]);
       setCurrentUserInput('');
       setIsAddDialogOpen(false);
@@ -421,13 +401,12 @@ export default function MyTravelsPage() {
       toast({
         variant: 'destructive',
         title: 'Error Adding Travel',
-        description: 'Failed to save your travel plan. Please try again.',
+        description: `Failed to save your travel plan. ${error instanceof Error ? error.message : 'Please try again.'}`,
       });
-       // If creation failed, potentially clean up if status was set? (Less likely needed)
-        if (newTravelDocId) {
-             // Optional: delete the partially created document if desired
-             // await deleteDoc(doc(db, 'travels', newTravelDocId));
-        }
+       // Optional: delete the partially created document if desired
+        // if (newTravelDocId) {
+        //      await deleteDoc(doc(db, 'travels', newTravelDocId));
+        // }
     } finally {
       setIsSubmitting(false);
       // Do not reset processingMatchId here, let the matching process handle it
@@ -450,22 +429,26 @@ export default function MyTravelsPage() {
         }
     };
 
-    const handleDurationSliderChange = (value: number[]) => {
-        setDurationSliderValue(value);
-        form.setValue('durationDays', value[0], { shouldValidate: true });
-        form.setValue('startDate', null, { shouldValidate: true });
-        form.setValue('endDate', null, { shouldValidate: true });
-    };
+    // This handler is likely redundant now as duration is derived from dates
+    // const handleDurationSliderChange = (value: number[]) => {
+    //     setDurationSliderValue(value);
+    //     form.setValue('durationDays', value[0], { shouldValidate: true });
+    //     // Clear dates if duration is set manually? - Decided against this logic. Dates take precedence.
+    //     // form.setValue('startDate', null, { shouldValidate: true });
+    //     // form.setValue('endDate', null, { shouldValidate: true });
+    // };
 
     // Updated handler for DatePicker within FormField
     const handleDateChange = (date: Date | undefined, field: ControllerRenderProps<TravelFormValues, 'startDate' | 'endDate'>) => {
         field.onChange(date); // Update RHF state
-        // If both dates are set, clear durationDays
+        // Trigger validation explicitly after setting date
+        form.trigger(['startDate', 'endDate']);
+        // If both dates are set, durationDays is irrelevant for saving
         const startDate = form.getValues('startDate');
         const endDate = form.getValues('endDate');
         if (startDate && endDate) {
-            form.setValue('durationDays', undefined, { shouldValidate: false }); // No need to validate here
-            setDurationSliderValue([1]); // Reset slider visually
+            form.setValue('durationDays', undefined, { shouldValidate: false }); // Clear durationDays if dates are set
+            // setDurationSliderValue([1]); // Optionally reset slider visually
         }
     }
 
@@ -528,30 +511,35 @@ export default function MyTravelsPage() {
                          setActivitySliderValue(otherIndex >= 0 ? otherIndex : 0);
                      }
                 }
-                if (durationDays) {
-                    form.setValue('durationDays', durationDays, { shouldValidate: true });
-                    setDurationSliderValue([durationDays]);
-                    form.setValue('startDate', null, { shouldValidate: true });
-                    form.setValue('endDate', null, { shouldValidate: true });
-                } else if (startDate && endDate) {
+                // Prioritize dates extracted by AI
+                if (startDate && endDate) {
                     try {
                         const start = new Date(startDate);
                         const end = new Date(endDate);
-                        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
+                        if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
                             form.setValue('startDate', start, { shouldValidate: true });
                             form.setValue('endDate', end, { shouldValidate: true });
-                            form.setValue('durationDays', undefined, { shouldValidate: true });
-                            setDurationSliderValue([1]);
+                            form.setValue('durationDays', undefined, { shouldValidate: true }); // Clear duration if dates are set
+                            // setDurationSliderValue([1]); // Reset slider visually
+                            toast({ title: "AI Update", description: "Dates updated. Review and save."});
                         } else {
-                             console.error("AI returned invalid date format:", startDate, endDate);
+                             console.error("AI returned invalid or illogical date format:", startDate, endDate);
                              toast({ variant: 'destructive', title: "AI Date Error", description: "AI provided invalid dates. Please set manually."});
                         }
                     } catch (e) {
                         console.error("Error parsing AI dates:", e);
                          toast({ variant: 'destructive', title: "AI Date Error", description: "Could not parse dates from AI. Please set manually."});
                     }
+                } else if (durationDays) { // Fallback to durationDays if dates are not extracted
+                    form.setValue('durationDays', durationDays, { shouldValidate: true });
+                    // setDurationSliderValue([durationDays]);
+                    // Clear dates if duration is set
+                    form.setValue('startDate', null, { shouldValidate: true });
+                    form.setValue('endDate', null, { shouldValidate: true });
+                     toast({ title: "AI Update", description: "Duration updated. Please set dates manually for matching."});
+                } else {
+                     toast({ title: "AI Update", description: "Preferences updated. Please set dates manually."});
                 }
-                 toast({ title: "AI Update", description: "Preferences updated based on chat. Review and save."});
             }
 
         } catch (error) {
@@ -576,16 +564,19 @@ export default function MyTravelsPage() {
     // --- Scroll Chat Area ---
     useEffect(() => {
         if (chatScrollAreaRef.current) {
-            const scrollElement = chatScrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
-            if (scrollElement) {
-                scrollElement.scrollTop = scrollElement.scrollHeight;
+            // Find the viewport element within the ScrollArea
+            const scrollViewport = chatScrollAreaRef.current.querySelector<HTMLDivElement>('[data-radix-scroll-area-viewport]');
+             if (scrollViewport) {
+                // Scroll to the bottom of the viewport
+                scrollViewport.scrollTop = scrollViewport.scrollHeight;
             }
         }
-    }, [chatHistory]);
+    }, [chatHistory]); // Dependency array includes chatHistory
 
 
      // --- Helper to parse preferences --- (Duplicate from groups, consider moving to utils)
-    const getPreference = (preferences: string[], key: string): string | undefined => {
+    const getPreference = (preferences: string[] | undefined, key: string): string | undefined => {
+         if (!preferences) return undefined; // Added check for undefined preferences
         const pref = preferences.find(p => p.startsWith(`${key}:`));
         return pref ? pref.split(':').slice(1).join(':') : undefined;
     };
@@ -627,6 +618,12 @@ export default function MyTravelsPage() {
     );
   }
 
+   // Add check for authentication before rendering main content
+   if (!isAuthenticated && !authLoading) {
+     // Optionally show a message or redirect, handled by useEffect already
+     return null;
+   }
+
   return (
     <div className="container mx-auto py-12 px-4">
       <div className="flex justify-between items-center mb-8">
@@ -647,7 +644,8 @@ export default function MyTravelsPage() {
             </DialogHeader>
 
              <Form {...form}>
-                <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4">
+                {/* Use a native form element here */}
+                 <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4">
 
                     {/* Trip Type Selection */}
                     <FormField
@@ -847,7 +845,7 @@ export default function MyTravelsPage() {
                                             />
 
                                             <FormItem>
-                                                <FormLabel className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Duration / Dates</FormLabel>
+                                                <FormLabel className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Dates <span className='text-destructive'>*</span></FormLabel>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
                                                      <FormField
                                                         control={form.control}
@@ -877,6 +875,7 @@ export default function MyTravelsPage() {
                                                                             selected={startDateField.value ?? undefined}
                                                                             onSelect={(date) => handleDateChange(date, startDateField)}
                                                                             initialFocus
+                                                                            disabled={(date) => date < new Date(new Date().setHours(0,0,0,0))} // Disable past dates
                                                                         />
                                                                     </PopoverContent>
                                                                 </Popover>
@@ -911,9 +910,10 @@ export default function MyTravelsPage() {
                                                                             mode="single"
                                                                             selected={endDateField.value ?? undefined}
                                                                             onSelect={(date) => handleDateChange(date, endDateField)}
-                                                                            disabled={(date) =>
-                                                                                form.watch('startDate') ? date < form.watch('startDate')! : false
-                                                                            }
+                                                                            disabled={(date) => {
+                                                                               const startDate = form.watch('startDate');
+                                                                               return (startDate ? date < startDate : false) || date < new Date(new Date().setHours(0,0,0,0));
+                                                                            }}
                                                                             initialFocus
                                                                         />
                                                                     </PopoverContent>
@@ -923,37 +923,13 @@ export default function MyTravelsPage() {
                                                         )}
                                                      />
                                                 </div>
-                                                 <FormField
-                                                    control={form.control}
-                                                    name="durationDays"
-                                                    render={({ field: durationField }) => (
-                                                         <FormItem className="pt-4 space-y-3">
-                                                             <FormLabel className="text-center block text-sm text-muted-foreground">Or select approximate duration</FormLabel>
-                                                             <FormControl>
-                                                                <Slider
-                                                                    id="duration-slider"
-                                                                    min={1}
-                                                                    max={MAX_DURATION_DAYS}
-                                                                    step={1}
-                                                                    value={durationSliderValue}
-                                                                    onValueChange={handleDurationSliderChange}
-                                                                    className={cn("w-[95%] mx-auto")}
-                                                                    disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))}
-                                                                    aria-label="Select Duration in Days"
-                                                                />
-                                                            </FormControl>
-                                                            <p className="text-center text-lg font-medium mt-2">
-                                                                {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
-                                                            </p>
-                                                            <FormMessage />
-                                                        </FormItem>
-                                                    )}
-                                                />
+                                                  {/* Removed the optional duration slider as dates are now required */}
                                             </FormItem>
 
 
-                                             {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
-                                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
+                                             {/* Display top-level form errors related to date refinement */}
+                                             {form.formState.errors.startDate?.type === 'refine' && (
+                                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.startDate.message}</p>
                                              )}
                                          </TabsContent>
 
@@ -967,7 +943,7 @@ export default function MyTravelsPage() {
                                                     {chatHistory.map((chat) => (
                                                         <div key={chat.timestamp} className={cn("mb-3 flex", chat.sender === 'user' ? 'justify-end' : 'justify-start')}>
                                                             <div className={cn(
-                                                                "rounded-lg p-2 px-3 max-w-[80%] text-sm",
+                                                                "rounded-lg p-2 px-3 max-w-[80%] text-sm break-words", // Added break-words
                                                                 chat.sender === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground border'
                                                             )}>
                                                                 {chat.message}
@@ -981,7 +957,7 @@ export default function MyTravelsPage() {
                                                             </div>
                                                         </div>
                                                     )}
-                                                    <div id="end-of-chat"></div>
+                                                    {/* Removed div with id="end-of-chat" as ScrollArea handles scrolling */}
                                                 </ScrollArea>
                                                  <div className="flex items-center gap-2">
                                                      <Textarea
@@ -1002,14 +978,14 @@ export default function MyTravelsPage() {
                                         </TabsContent>
                                     </Tabs>
                                 </FormControl>
-                                <FormMessage />
+                                {/* Removed FormMessage here as errors are handled within fields */}
                             </FormItem>
                         )}
                     />
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting || isAiLoading}>
+                        <Button type="submit" disabled={isSubmitting || isAiLoading || !form.formState.isValid}> {/* Disable if form is invalid */}
                         {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
                         </Button>
@@ -1082,10 +1058,10 @@ export default function MyTravelsPage() {
                             <Calendar className="h-4 w-4"/>
                             {formattedStartDate} - {formattedEndDate}
                         </p>
-                     ) : travel.durationDays ? (
+                     ) : travel.durationDays ? ( // Fallback to durationDays if dateRange is missing (legacy data?)
                          <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
                             <CalendarDays className="h-4 w-4"/>
-                            {travel.durationDays} day{travel.durationDays !== 1 ? 's' : ''}
+                            {travel.durationDays} day{travel.durationDays !== 1 ? 's' : ''} (Dates not set)
                          </p>
                      ) : null}
                 </CardHeader>
@@ -1101,7 +1077,7 @@ export default function MyTravelsPage() {
                          </p>
                      )}
                      {/* Display other preferences */}
-                     {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
+                     {travel.preferences?.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
                          <div className="flex items-start gap-1 pt-1">
                             <Heart className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary"/>
                             <div className="flex flex-wrap gap-1">
@@ -1156,7 +1132,7 @@ export default function MyTravelsPage() {
                      </div>
 
 
-                    {(!mood && !activity && !(travel.places && travel.places.length > 0) && travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length === 0) && (
+                    {(!mood && !activity && !(travel.places && travel.places.length > 0) && travel.preferences?.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length === 0) && (
                         <p className="text-sm text-muted-foreground italic">No specific preferences set.</p>
                     )}
                 </CardContent>
