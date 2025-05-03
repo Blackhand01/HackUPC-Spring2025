@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Plane, LogOut, Home } from 'lucide-react'; // Added Home icon
+import { Plane, LogOut, Home, Users, PlaneTakeoff } from 'lucide-react'; // Added Users, PlaneTakeoff icons
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 
@@ -26,13 +26,21 @@ export function Header() {
           {/* Conditional links based on authentication */}
           {isAuthenticated ? (
             <>
-              <Link href="/matches">
-                 <Button variant="ghost" size="sm" className="px-2 md:px-4">Find Swaps</Button>
+              <Link href="/matches"> {/* Changed href, still leads to "My Travels" */}
+                 <Button variant="ghost" size="sm" className="px-2 md:px-4">
+                    <PlaneTakeoff className="mr-0 md:mr-2 h-4 w-4" /> {/* Icon for travels */}
+                    <span className="hidden md:inline">My Travels</span>
+                     <span className="md:hidden">Travels</span> {/* Short label for mobile */}
+                 </Button>
               </Link>
                <Link href="/groups">
-                 <Button variant="ghost" size="sm" className="px-2 md:px-4">Groups</Button>
+                 <Button variant="ghost" size="sm" className="px-2 md:px-4">
+                    <Users className="mr-0 md:mr-2 h-4 w-4" /> {/* Icon for groups */}
+                    <span className="hidden md:inline">Groups</span>
+                     <span className="md:hidden">Groups</span> {/* Short label for mobile */}
+                 </Button>
               </Link>
-               <Link href="/properties"> {/* Added Properties Link */}
+               <Link href="/properties">
                  <Button variant="ghost" size="sm" className="px-2 md:px-4">
                     <Home className="mr-0 md:mr-2 h-4 w-4" />
                     <span className="hidden md:inline">My Properties</span>
@@ -60,3 +68,5 @@ export function Header() {
     </header>
   );
 }
+
+    
