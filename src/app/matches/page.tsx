@@ -1,31 +1,33 @@
-// src/app/matches/page.tsx - Refactored for "My Travels / Find Swap" with Emotional Planning
+// src/app/matches/page.tsx - Refactored for "My Travels / Plan Trip"
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { collection, query, where, getDocs, addDoc, Timestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, Timestamp, doc, getDoc } from 'firebase/firestore';
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Textarea } from '@/components/ui/textarea'; // Keep Textarea for potential AI mode
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users, Utensils, Info, CalendarDays, Leaf } from 'lucide-react'; // Added icons for planning, including Leaf
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users, Utensils, Info, CalendarDays, Leaf, UserPlus, Group } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
 import { Calendar as ShadCalendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"; // Added Tabs
-import { Slider } from "@/components/ui/slider"; // Added Slider
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Slider } from "@/components/ui/slider";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select"; // Added Select
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"; // Added RadioGroup
 
-// Define interfaces based on Firestore structure
+
+// Interfaces (consider moving to a shared types file)
 interface Place {
   name: string;
   coordinate?: { lat: number | null; lng: number | null };
@@ -36,11 +38,16 @@ interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
-  preferences: string[]; // Will store mood, activity/activityOther
-  dateRange?: { start: Timestamp; end: Timestamp } | null; // Optional
-  durationDays?: number; // Optional duration in days
-  places?: Place[]; // Optional
+  preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
+  dateRange?: { start: Timestamp; end: Timestamp } | null;
+  durationDays?: number;
+  places?: Place[];
   createdAt: Timestamp;
+}
+
+interface Group {
+  id: string;
+  groupName: string;
 }
 
 // --- Emotional Planning Constants ---
@@ -49,7 +56,7 @@ const MOOD_OPTIONS = [
     { value: "adventurous", label: "Adventurous", icon: <Mountain className="h-4 w-4" /> },
     { value: "cultural", label: "Cultural", icon: <Film className="h-4 w-4" /> },
     { value: "social", label: "Social", icon: <Users className="h-4 w-4" /> },
-    { value: "nature", label: "Nature", icon: <Leaf className="h-4 w-4" /> }, // Using imported Leaf icon
+    { value: "nature", label: "Nature", icon: <Leaf className="h-4 w-4" /> },
 ];
 const ACTIVITY_OPTIONS = [
     { value: "hiking", label: "Hiking", icon: <Mountain className="h-4 w-4" /> },
@@ -62,8 +69,10 @@ const ACTIVITY_OPTIONS = [
 const MAX_DURATION_DAYS = 30;
 
 
-// Define Zod schema for the new travel form validation (including emotional planning)
+// Define Zod schema for the new travel form validation
 const travelFormSchema = z.object({
+  tripType: z.enum(['individual', 'group'], { required_error: "Please select a trip type."}),
+  groupId: z.string().optional(), // Required if tripType is 'group'
   // Mode 1: Guided Sliders
   mood: z.string().refine(val => MOOD_OPTIONS.some(opt => opt.value === val), { message: "Please select a valid mood." }).optional(),
   activity: z.string().refine(val => ACTIVITY_OPTIONS.some(opt => opt.value === val), { message: "Please select a valid activity." }).optional(),
@@ -74,8 +83,15 @@ const travelFormSchema = z.object({
   endDate: z.date().optional().nullable(),
   // Mode 2: AI (for future use, keep schema simple for now)
   aiPrompt: z.string().optional(),
-  // Preferences string[] will be constructed on submit
-  // places: z.array(z.object({ name: z.string(), country: z.string() })).optional(),
+}).refine(data => {
+    // If trip type is group, groupId must be selected
+    if (data.tripType === 'group') {
+        return !!data.groupId;
+    }
+    return true;
+}, {
+    message: "Please select a group for a group trip.",
+    path: ["groupId"],
 }).refine(data => {
     // If activity is 'other', activityOther must be provided
     if (data.activity === 'other') {
@@ -91,11 +107,10 @@ const travelFormSchema = z.object({
     const hasActivity = !!data.activity;
     const hasDurationDays = data.durationDays !== undefined && data.durationDays !== null && data.durationDays > 0;
     const hasDateRange = data.startDate !== undefined && data.startDate !== null && data.endDate !== undefined && data.endDate !== null;
-    // Check if either mode 1 fields are present OR AI prompt exists (future)
     return hasMood || hasActivity || hasDurationDays || hasDateRange || !!data.aiPrompt;
 }, {
     message: "Please provide at least one preference (Mood, Activity, Duration/Dates).",
-    path: ["mood"], // Assign error message to one field for simplicity
+    path: ["mood"],
 }).refine(data => {
     // Ensure end date is after start date if both are provided
     if (data.startDate && data.endDate) {
@@ -114,8 +129,10 @@ export default function MyTravelsPage() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const router = useRouter();
   const { toast } = useToast();
-  const [myTravels, setMyTravels] = useState<Travel[]>([]);
+  const [myIndividualTravels, setMyIndividualTravels] = useState<Travel[]>([]);
+  const [myGroups, setMyGroups] = useState<Group[]>([]); // For group selection
   const [loadingTravels, setLoadingTravels] = useState(true);
+  const [loadingGroups, setLoadingGroups] = useState(false); // Separate loading for groups in dialog
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -127,10 +144,12 @@ export default function MyTravelsPage() {
   const form = useForm<TravelFormValues>({
     resolver: zodResolver(travelFormSchema),
     defaultValues: {
+      tripType: 'individual', // Default to individual
+      groupId: undefined,
       mood: undefined,
       activity: undefined,
       activityOther: '',
-      durationDays: 5, // Default value syncs with slider
+      durationDays: 5,
       startDate: null,
       endDate: null,
       aiPrompt: '',
@@ -145,21 +164,20 @@ export default function MyTravelsPage() {
   }, [authLoading, isAuthenticated, router]);
 
 
-  // --- Effect for Fetching Individual Travels ---
-  useEffect(() => {
-    const fetchMyTravels = async () => {
+  // --- Fetch Individual Travels ---
+   const fetchMyIndividualTravels = useCallback(async () => {
       if (user?.uid) {
         setLoadingTravels(true);
         try {
           const travelsCollection = collection(db, 'travels');
-          // Query for travels where userId matches and groupId is null
+          // Query for travels where userId matches AND groupId is null
           const q = query(travelsCollection, where('userId', '==', user.uid), where('groupId', '==', null));
           const querySnapshot = await getDocs(q);
           const travelsList = querySnapshot.docs.map(doc => ({
             id: doc.id,
             ...doc.data(),
           })) as Travel[];
-          setMyTravels(travelsList);
+          setMyIndividualTravels(travelsList);
         } catch (error) {
           console.error('Error fetching user travels:', error);
           toast({
@@ -173,12 +191,39 @@ export default function MyTravelsPage() {
       } else if (!authLoading) {
         setLoadingTravels(false);
       }
-    };
+   }, [user, authLoading, toast]);
 
+
+  // --- Fetch User's Groups (for selection in the dialog) ---
+  const fetchMyGroups = useCallback(async () => {
+      if (user?.uid) {
+          setLoadingGroups(true);
+          try {
+              const groupsCollection = collection(db, 'groups');
+              const q = query(groupsCollection, where('users', 'array-contains', user.uid));
+              const querySnapshot = await getDocs(q);
+              const groupsList = querySnapshot.docs.map(doc => ({
+                  id: doc.id,
+                  groupName: doc.data().groupName || `Group ${doc.id.substring(0,5)}`, // Fallback name
+              })) as Group[];
+              setMyGroups(groupsList);
+          } catch (error) {
+              console.error('Error fetching groups for selection:', error);
+              // Don't toast here, it might be annoying in the dialog
+          } finally {
+              setLoadingGroups(false);
+          }
+      }
+  }, [user]);
+
+  // --- Initial Data Fetch ---
+  useEffect(() => {
     if (!authLoading && isAuthenticated && user) {
-      fetchMyTravels();
+      fetchMyIndividualTravels();
+      fetchMyGroups(); // Fetch groups when user is loaded
     }
-  }, [user, isAuthenticated, authLoading, toast]);
+  }, [user, isAuthenticated, authLoading, fetchMyIndividualTravels, fetchMyGroups]);
+
 
   // --- Form Submission ---
   const onSubmit: SubmitHandler<TravelFormValues> = async (data) => {
@@ -200,28 +245,37 @@ export default function MyTravelsPage() {
 
     try {
        const travelToAdd: Omit<Travel, 'id'> = {
-        userId: user.uid,
-        groupId: null,
-        preferences: preferences, // Use constructed preferences
+        userId: data.tripType === 'individual' ? user.uid : null, // Assign userId only if individual
+        groupId: data.tripType === 'group' ? data.groupId! : null, // Assign groupId only if group
+        preferences: preferences,
         dateRange: data.startDate && data.endDate ? {
             start: Timestamp.fromDate(data.startDate),
             end: Timestamp.fromDate(data.endDate)
         } : null,
-        durationDays: (data.startDate && data.endDate) ? undefined : data.durationDays, // Only store duration if no date range
-        places: [], // Start with empty places for now
+        durationDays: (data.startDate && data.endDate) ? undefined : data.durationDays,
+        places: [],
         createdAt: Timestamp.now(),
       };
 
       const docRef = await addDoc(collection(db, 'travels'), travelToAdd);
       toast({
         title: 'Travel Plan Added!',
-        description: `Your new travel plan has been saved.`,
+        description: `Your new ${data.tripType} travel plan has been saved.`,
       });
 
-      // Add the new travel to the local state
-      setMyTravels(prev => [...prev, { ...travelToAdd, id: docRef.id, createdAt: travelToAdd.createdAt }]);
+       // Update local state only if it was an individual travel
+       if (data.tripType === 'individual') {
+            setMyIndividualTravels(prev => [...prev, { ...travelToAdd, id: docRef.id, createdAt: travelToAdd.createdAt }]);
+       } else {
+           // Optionally: Navigate to the group page or refetch group travels?
+           // For now, just close the dialog. The group page will fetch its travels.
+           router.push('/groups'); // Navigate to groups page after adding a group trip
+       }
+
 
       form.reset({ // Reset form with defaults
+          tripType: 'individual',
+          groupId: undefined,
           mood: undefined,
           activity: undefined,
           activityOther: '',
@@ -258,7 +312,6 @@ export default function MyTravelsPage() {
         const index = value[0];
         setActivitySliderValue(index);
         form.setValue('activity', ACTIVITY_OPTIONS[index]?.value, { shouldValidate: true });
-        // Reset 'other' field if not selected
         if (ACTIVITY_OPTIONS[index]?.value !== 'other') {
             form.setValue('activityOther', '', { shouldValidate: true });
         }
@@ -267,19 +320,50 @@ export default function MyTravelsPage() {
     const handleDurationSliderChange = (value: number[]) => {
         setDurationSliderValue(value);
         form.setValue('durationDays', value[0], { shouldValidate: true });
-        // Clear date range if duration is set
         form.setValue('startDate', null, { shouldValidate: true });
         form.setValue('endDate', null, { shouldValidate: true });
     };
 
     const handleDateChange = (date: Date | undefined, field: 'startDate' | 'endDate') => {
         form.setValue(field, date, { shouldValidate: true });
-        // Clear duration days if date range is set
         if (form.getValues('startDate') && form.getValues('endDate')) {
              form.setValue('durationDays', undefined, { shouldValidate: true });
-             setDurationSliderValue([1]); // Reset slider visual, maybe not needed?
+             setDurationSliderValue([1]);
         }
     }
+
+     // --- Helper to parse preferences --- (Duplicate from groups, consider moving to utils)
+    const getPreference = (preferences: string[], key: string): string | undefined => {
+        const pref = preferences.find(p => p.startsWith(`${key}:`));
+        return pref ? pref.split(':').slice(1).join(':') : undefined;
+    };
+
+    const getPreferenceIcon = (key: string, value: string | undefined): React.ReactNode => {
+         if (!value) return null;
+        if (key === 'mood') {
+            switch (value) {
+                case 'relaxed': return <Smile className="h-4 w-4 text-primary"/>;
+                case 'adventurous': return <Mountain className="h-4 w-4 text-primary"/>;
+                case 'cultural': return <Film className="h-4 w-4 text-primary"/>;
+                case 'social': return <Users className="h-4 w-4 text-primary"/>;
+                case 'nature': return <Leaf className="h-4 w-4 text-primary"/>;
+                default: return <Heart className="h-4 w-4 text-primary"/>;
+            }
+        }
+        if (key === 'activity') {
+             if (value.startsWith('other:')) return <Info className="h-4 w-4 text-primary"/>;
+            switch (value) {
+                case 'hiking': return <Mountain className="h-4 w-4 text-primary"/>;
+                case 'museums': return <Film className="h-4 w-4 text-primary"/>;
+                case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>; // Placeholder
+                case 'nightlife': return <Users className="h-4 w-4 text-primary"/>;
+                case 'foodie': return <Utensils className="h-4 w-4 text-primary"/>;
+                 case 'other': return <Info className="h-4 w-4 text-primary"/>; // Should not happen if startsWith('other:') is checked
+                default: return <Heart className="h-4 w-4 text-primary"/>;
+            }
+        }
+        return null;
+    };
 
 
   // --- Render Logic ---
@@ -294,7 +378,7 @@ export default function MyTravelsPage() {
   return (
     <div className="container mx-auto py-12 px-4">
       <div className="flex justify-between items-center mb-8">
-        <h1 className="text-3xl font-bold flex items-center gap-2"><User className="h-8 w-8 text-primary"/> My Individual Travels</h1>
+        <h1 className="text-3xl font-bold flex items-center gap-2"><User className="h-8 w-8 text-primary"/> My Travels</h1>
         {/* --- Add New Travel Dialog --- */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
@@ -302,227 +386,291 @@ export default function MyTravelsPage() {
               <PlusCircle className="mr-2 h-4 w-4" /> Plan New Trip
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[700px]"> {/* Increased width */}
+          <DialogContent className="sm:max-w-[700px]">
             <DialogHeader>
               <DialogTitle className="text-2xl">Plan Your Next Adventure</DialogTitle>
               <DialogDescription>
-                Tell us about your dream trip using the options below.
+                Tell us about your dream trip. Is it solo or with a group?
               </DialogDescription>
             </DialogHeader>
 
-            <Tabs defaultValue="guided" className="w-full mt-4">
-              <TabsList className="grid w-full grid-cols-2">
-                <TabsTrigger value="guided"><SlidersHorizontal className="mr-2 h-4 w-4"/>Guided</TabsTrigger>
-                <TabsTrigger value="ai" disabled><Wand2 className="mr-2 h-4 w-4"/>AI Assistant (Coming Soon)</TabsTrigger>
-              </TabsList>
+            {/* --- Main Form Content --- */}
+            <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 py-4">
 
-              {/* --- Mode 1: Guided Planning (Sliders) --- */}
-              <TabsContent value="guided">
-                 <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 py-4">
-                     {/* Mood Slider */}
-                    <div className="space-y-3">
-                      <Label htmlFor="mood-slider" className="flex items-center gap-1 text-lg font-semibold"><Smile className="h-5 w-5"/>Mood</Label>
-                      <Controller
-                        name="mood" // Control the 'mood' field
+                 {/* Trip Type Selection */}
+                 <div className="space-y-3">
+                    <Label className="text-lg font-semibold">Trip Type</Label>
+                     <Controller
+                        name="tripType"
                         control={form.control}
                         render={({ field }) => (
-                            <>
-                            <Slider
-                                id="mood-slider"
-                                min={0}
-                                max={MOOD_OPTIONS.length - 1}
-                                step={1}
-                                value={[moodSliderValue]}
-                                onValueChange={handleMoodSliderChange}
-                                className={cn("w-[95%] mx-auto")}
-                                disabled={isSubmitting}
-                                aria-label="Select Mood"
-                             />
-                             <div className="flex justify-between text-xs text-muted-foreground px-2">
-                                {MOOD_OPTIONS.map((opt, index) => (
-                                     <span key={opt.value} className={cn(index === moodSliderValue && "font-bold text-primary")}>
-                                         {opt.label}
-                                    </span>
-                                ))}
-                             </div>
-                             <p className="text-center text-lg font-medium mt-2">
-                                 {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
-                             </p>
-                            </>
+                          <RadioGroup
+                            onValueChange={field.onChange}
+                            defaultValue={field.value}
+                            className="flex gap-4"
+                            disabled={isSubmitting}
+                          >
+                            <Label htmlFor="individual" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent has-[:checked]:bg-accent has-[:checked]:border-primary flex-1 justify-center">
+                              <RadioGroupItem value="individual" id="individual" />
+                              <User className="h-5 w-5 mr-1" /> Individual
+                            </Label>
+                            <Label htmlFor="group" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent has-[:checked]:bg-accent has-[:checked]:border-primary flex-1 justify-center">
+                              <RadioGroupItem value="group" id="group" />
+                               <Users className="h-5 w-5 mr-1" /> Group
+                            </Label>
+                          </RadioGroup>
                         )}
                       />
-                      {form.formState.errors.mood && <p className="text-sm text-destructive text-center">{form.formState.errors.mood.message}</p>}
-                    </div>
+                       {form.formState.errors.tripType && <p className="text-sm text-destructive text-center">{form.formState.errors.tripType.message}</p>}
+                 </div>
 
-                    {/* Activity Slider */}
-                    <div className="space-y-3">
-                        <Label htmlFor="activity-slider" className="flex items-center gap-1 text-lg font-semibold"><Mountain className="h-5 w-5"/>Activity</Label>
+                {/* Conditional Group Selector */}
+                {form.watch('tripType') === 'group' && (
+                    <div className="space-y-2">
+                        <Label htmlFor="groupId" className="text-lg font-semibold">Select Group</Label>
                         <Controller
-                            name="activity"
+                            name="groupId"
+                            control={form.control}
+                            render={({ field }) => (
+                                <Select
+                                    onValueChange={field.onChange}
+                                    defaultValue={field.value}
+                                    disabled={isSubmitting || loadingGroups}
+                                >
+                                    <SelectTrigger id="groupId" aria-invalid={form.formState.errors.groupId ? 'true' : 'false'}>
+                                        <SelectValue placeholder={loadingGroups ? "Loading groups..." : "Select a group"} />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        {loadingGroups ? (
+                                            <SelectItem value="loading" disabled>Loading...</SelectItem>
+                                        ) : myGroups.length === 0 ? (
+                                             <SelectItem value="no-groups" disabled>No groups found</SelectItem>
+                                        ) : (
+                                            <SelectGroup>
+                                                <SelectLabel>Your Groups</SelectLabel>
+                                                {myGroups.map((group) => (
+                                                    <SelectItem key={group.id} value={group.id}>
+                                                        {group.groupName}
+                                                    </SelectItem>
+                                                ))}
+                                            </SelectGroup>
+                                        )}
+                                    </SelectContent>
+                                </Select>
+                            )}
+                        />
+                        {form.formState.errors.groupId && <p className="text-sm text-destructive">{form.formState.errors.groupId.message}</p>}
+                         <p className="text-xs text-muted-foreground">Plan this trip with one of your existing groups.</p>
+                    </div>
+                )}
+
+
+              {/* Emotional Planning Section (Tabs) */}
+              <Tabs defaultValue="guided" className="w-full mt-2 border-t pt-6">
+                  <Label className="text-lg font-semibold mb-3 block">Trip Preferences</Label>
+                  <TabsList className="grid w-full grid-cols-2">
+                    <TabsTrigger value="guided"><SlidersHorizontal className="mr-2 h-4 w-4"/>Guided</TabsTrigger>
+                    <TabsTrigger value="ai" disabled><Wand2 className="mr-2 h-4 w-4"/>AI Assistant (Soon)</TabsTrigger>
+                  </TabsList>
+
+                  {/* --- Mode 1: Guided Planning --- */}
+                  <TabsContent value="guided" className="mt-6 space-y-6">
+                         {/* Mood Slider */}
+                        <div className="space-y-3">
+                          <Label htmlFor="mood-slider" className="flex items-center gap-1 text-base font-semibold"><Smile className="h-5 w-5"/>Mood</Label>
+                          <Controller
+                            name="mood"
                             control={form.control}
                             render={({ field }) => (
                                 <>
-                                 <Slider
-                                     id="activity-slider"
-                                     min={0}
-                                     max={ACTIVITY_OPTIONS.length - 1}
-                                     step={1}
-                                     value={[activitySliderValue]}
-                                     onValueChange={handleActivitySliderChange}
-                                     className={cn("w-[95%] mx-auto")}
-                                     disabled={isSubmitting}
-                                     aria-label="Select Activity"
+                                <Slider
+                                    id="mood-slider"
+                                    min={0}
+                                    max={MOOD_OPTIONS.length - 1}
+                                    step={1}
+                                    value={[moodSliderValue]}
+                                    onValueChange={handleMoodSliderChange}
+                                    className={cn("w-[95%] mx-auto")}
+                                    disabled={isSubmitting}
+                                    aria-label="Select Mood"
                                  />
                                  <div className="flex justify-between text-xs text-muted-foreground px-2">
-                                     {ACTIVITY_OPTIONS.map((opt, index) => (
-                                         <span key={opt.value} className={cn(index === activitySliderValue && "font-bold text-primary")}>
+                                    {MOOD_OPTIONS.map((opt, index) => (
+                                         <span key={opt.value} className={cn(index === moodSliderValue && "font-bold text-primary")}>
                                              {opt.label}
-                                         </span>
-                                     ))}
+                                        </span>
+                                    ))}
                                  </div>
-                                 <p className="text-center text-lg font-medium mt-2">
-                                     {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
+                                 <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
+                                     {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
                                  </p>
                                 </>
                             )}
-                        />
-                        {/* Conditional 'Other' Input */}
-                        {form.watch('activity') === 'other' && (
-                            <div className="px-4 space-y-1">
-                                <Label htmlFor="activityOther">Describe "Other" Activity</Label>
-                                <Input
-                                    id="activityOther"
-                                    placeholder="e.g., Volunteering, Language course"
-                                    {...form.register('activityOther')}
-                                    disabled={isSubmitting}
-                                    aria-invalid={form.formState.errors.activityOther ? 'true' : 'false'}
-                                />
-                                {form.formState.errors.activityOther && <p className="text-sm text-destructive">{form.formState.errors.activityOther.message}</p>}
-                            </div>
-                        )}
-                         {form.formState.errors.activity && <p className="text-sm text-destructive text-center">{form.formState.errors.activity.message}</p>}
-                    </div>
+                          />
+                          {form.formState.errors.mood?.type !== 'refine' && form.formState.errors.mood && <p className="text-sm text-destructive text-center">{form.formState.errors.mood.message}</p>}
+                        </div>
 
-                     {/* Duration Slider OR Date Range Picker */}
-                    <div className="space-y-3">
-                         <Label className="flex items-center gap-1 text-lg font-semibold"><CalendarDays className="h-5 w-5"/>Duration</Label>
-                         {/* Date Range */}
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
-                            <div className="space-y-2">
-                                <Label htmlFor="startDate">Start Date</Label>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                    <Button
-                                        variant={"outline"}
-                                        className={cn(
-                                        "w-full justify-start text-left font-normal",
-                                        !form.watch('startDate') && "text-muted-foreground"
-                                        )}
-                                        disabled={isSubmitting}
-                                    >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {form.watch('startDate') ? format(form.watch('startDate')!, "PPP") : <span>Pick a date</span>}
-                                    </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
-                                    <ShadCalendar
-                                        mode="single"
-                                        selected={form.watch('startDate') ?? undefined}
-                                        onSelect={(date) => handleDateChange(date, 'startDate')}
-                                        initialFocus
-                                    />
-                                    </PopoverContent>
-                                </Popover>
-                                {form.formState.errors.startDate && <p className="text-sm text-destructive">{form.formState.errors.startDate.message}</p>}
-                            </div>
-                            <div className="space-y-2">
-                                <Label htmlFor="endDate">End Date</Label>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                    <Button
-                                        variant={"outline"}
-                                        className={cn(
-                                        "w-full justify-start text-left font-normal",
-                                        !form.watch('endDate') && "text-muted-foreground"
-                                        )}
-                                        disabled={isSubmitting || !form.watch('startDate')} // Disable if no start date
-                                    >
-                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                        {form.watch('endDate') ? format(form.watch('endDate')!, "PPP") : <span>Pick a date</span>}
-                                    </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
-                                    <ShadCalendar
-                                        mode="single"
-                                        selected={form.watch('endDate') ?? undefined}
-                                        onSelect={(date) => handleDateChange(date, 'endDate')}
-                                        disabled={(date) =>
-                                            form.watch('startDate') ? date < form.watch('startDate')! : false
-                                        }
-                                        initialFocus
-                                    />
-                                    </PopoverContent>
-                                </Popover>
-                                {form.formState.errors.endDate && <p className="text-sm text-destructive">{form.formState.errors.endDate.message}</p>}
-                            </div>
-                         </div>
-
-                        {/* Duration Slider - Conditionally rendered or just shown */}
-                        <div className="space-y-3 pt-4">
-                             <Label htmlFor="duration-slider" className="text-center block text-sm text-muted-foreground">Or select number of days</Label>
-                             <Controller
-                                name="durationDays"
+                        {/* Activity Slider */}
+                        <div className="space-y-3">
+                            <Label htmlFor="activity-slider" className="flex items-center gap-1 text-base font-semibold"><Mountain className="h-5 w-5"/>Activity</Label>
+                            <Controller
+                                name="activity"
                                 control={form.control}
                                 render={({ field }) => (
                                     <>
-                                    <Slider
-                                        id="duration-slider"
-                                        min={1}
-                                        max={MAX_DURATION_DAYS}
-                                        step={1}
-                                        value={durationSliderValue}
-                                        onValueChange={handleDurationSliderChange}
-                                        className={cn("w-[95%] mx-auto")}
-                                        disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))} // Disable if date range is set
-                                        aria-label="Select Duration in Days"
-                                    />
-                                    <p className="text-center text-lg font-medium mt-2">
-                                        {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
-                                    </p>
+                                     <Slider
+                                         id="activity-slider"
+                                         min={0}
+                                         max={ACTIVITY_OPTIONS.length - 1}
+                                         step={1}
+                                         value={[activitySliderValue]}
+                                         onValueChange={handleActivitySliderChange}
+                                         className={cn("w-[95%] mx-auto")}
+                                         disabled={isSubmitting}
+                                         aria-label="Select Activity"
+                                     />
+                                     <div className="flex justify-between text-xs text-muted-foreground px-2">
+                                         {ACTIVITY_OPTIONS.map((opt, index) => (
+                                             <span key={opt.value} className={cn(index === activitySliderValue && "font-bold text-primary")}>
+                                                 {opt.label}
+                                             </span>
+                                         ))}
+                                     </div>
+                                     <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
+                                         {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
+                                     </p>
                                     </>
                                 )}
                             />
-                           {form.formState.errors.durationDays && <p className="text-sm text-destructive text-center">{form.formState.errors.durationDays.message}</p>}
+                            {form.watch('activity') === 'other' && (
+                                <div className="px-4 space-y-1">
+                                    <Label htmlFor="activityOther">Describe "Other" Activity</Label>
+                                    <Input
+                                        id="activityOther"
+                                        placeholder="e.g., Volunteering, Language course"
+                                        {...form.register('activityOther')}
+                                        disabled={isSubmitting}
+                                        aria-invalid={form.formState.errors.activityOther ? 'true' : 'false'}
+                                    />
+                                    {form.formState.errors.activityOther && <p className="text-sm text-destructive">{form.formState.errors.activityOther.message}</p>}
+                                </div>
+                            )}
+                             {form.formState.errors.activity && <p className="text-sm text-destructive text-center">{form.formState.errors.activity.message}</p>}
                         </div>
+
+                         {/* Duration Slider OR Date Range Picker */}
+                        <div className="space-y-3">
+                             <Label className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Duration</Label>
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
+                                <div className="space-y-2">
+                                    <Label htmlFor="startDate">Start Date</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                        <Button
+                                            variant={"outline"}
+                                            className={cn(
+                                            "w-full justify-start text-left font-normal",
+                                            !form.watch('startDate') && "text-muted-foreground"
+                                            )}
+                                            disabled={isSubmitting}
+                                        >
+                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                            {form.watch('startDate') ? format(form.watch('startDate')!, "PPP") : <span>Pick a date</span>}
+                                        </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0">
+                                        <ShadCalendar
+                                            mode="single"
+                                            selected={form.watch('startDate') ?? undefined}
+                                            onSelect={(date) => handleDateChange(date, 'startDate')}
+                                            initialFocus
+                                        />
+                                        </PopoverContent>
+                                    </Popover>
+                                    {form.formState.errors.startDate && <p className="text-sm text-destructive">{form.formState.errors.startDate.message}</p>}
+                                </div>
+                                <div className="space-y-2">
+                                    <Label htmlFor="endDate">End Date</Label>
+                                    <Popover>
+                                        <PopoverTrigger asChild>
+                                        <Button
+                                            variant={"outline"}
+                                            className={cn(
+                                            "w-full justify-start text-left font-normal",
+                                            !form.watch('endDate') && "text-muted-foreground"
+                                            )}
+                                            disabled={isSubmitting || !form.watch('startDate')}
+                                        >
+                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                            {form.watch('endDate') ? format(form.watch('endDate')!, "PPP") : <span>Pick a date</span>}
+                                        </Button>
+                                        </PopoverTrigger>
+                                        <PopoverContent className="w-auto p-0">
+                                        <ShadCalendar
+                                            mode="single"
+                                            selected={form.watch('endDate') ?? undefined}
+                                            onSelect={(date) => handleDateChange(date, 'endDate')}
+                                            disabled={(date) =>
+                                                form.watch('startDate') ? date < form.watch('startDate')! : false
+                                            }
+                                            initialFocus
+                                        />
+                                        </PopoverContent>
+                                    </Popover>
+                                    {form.formState.errors.endDate && <p className="text-sm text-destructive">{form.formState.errors.endDate.message}</p>}
+                                </div>
+                             </div>
+
+                            <div className="space-y-3 pt-4">
+                                 <Label htmlFor="duration-slider" className="text-center block text-sm text-muted-foreground">Or select number of days</Label>
+                                 <Controller
+                                    name="durationDays"
+                                    control={form.control}
+                                    render={({ field }) => (
+                                        <>
+                                        <Slider
+                                            id="duration-slider"
+                                            min={1}
+                                            max={MAX_DURATION_DAYS}
+                                            step={1}
+                                            value={durationSliderValue}
+                                            onValueChange={handleDurationSliderChange}
+                                            className={cn("w-[95%] mx-auto")}
+                                            disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))}
+                                            aria-label="Select Duration in Days"
+                                        />
+                                        <p className="text-center text-lg font-medium mt-2">
+                                            {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
+                                        </p>
+                                        </>
+                                    )}
+                                />
+                               {form.formState.errors.durationDays && <p className="text-sm text-destructive text-center">{form.formState.errors.durationDays.message}</p>}
+                            </div>
+                        </div>
+                         {/* General Error Message for missing fields */}
+                         {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
+                            <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
+                         )}
+                  </TabsContent>
+
+                  {/* --- Mode 2: AI Assistant --- */}
+                  <TabsContent value="ai">
+                    <div className="py-10 text-center">
+                      <Wand2 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
+                      <p className="text-muted-foreground">AI Assistant feature coming soon!</p>
                     </div>
+                  </TabsContent>
+                </Tabs>
 
-
-                    {/* General Error Message for missing fields */}
-                     {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
-                        <p className="text-sm text-destructive text-center font-semibold">{form.formState.errors.mood.message}</p>
-                     )}
-
-
-                    <DialogFooter>
-                        <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting}>
-                        {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {isSubmitting ? 'Saving...' : 'Save Travel Plan'}
-                        </Button>
-                    </DialogFooter>
-                 </form>
-              </TabsContent>
-
-              {/* --- Mode 2: AI Assistant --- */}
-              <TabsContent value="ai">
-                <div className="py-10 text-center">
-                  <Wand2 className="h-12 w-12 mx-auto text-muted-foreground mb-4" />
-                  <p className="text-muted-foreground">AI Assistant feature coming soon!</p>
-                  {/* Add AI chat interface here later */}
-                </div>
-              </TabsContent>
-            </Tabs>
-
+                <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
+                    <Button type="submit" disabled={isSubmitting}>
+                    {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                    {isSubmitting ? 'Saving...' : 'Save Travel Plan'}
+                    </Button>
+                </DialogFooter>
+            </form>
           </DialogContent>
         </Dialog>
       </div>
@@ -533,40 +681,37 @@ export default function MyTravelsPage() {
           <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
           <p className="mt-4 text-muted-foreground">Loading your travel plans...</p>
         </div>
-      ) : myTravels.length === 0 ? (
+      ) : myIndividualTravels.length === 0 ? (
          <Card className="text-center py-12 shadow-md">
           <CardHeader>
              <PlaneTakeoff className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
-            <CardTitle>No Solo Trips Planned Yet</CardTitle>
-            <CardDescription>Start planning your next solo adventure!</CardDescription>
+            <CardTitle>No Individual Trips Planned Yet</CardTitle>
+            <CardDescription>Start planning your next solo adventure or a trip with friends!</CardDescription>
           </CardHeader>
           <CardContent>
              <Button onClick={() => setIsAddDialogOpen(true)}>
-               <PlusCircle className="mr-2 h-4 w-4" /> Plan Your First Solo Trip
+               <PlusCircle className="mr-2 h-4 w-4" /> Plan Your First Trip
              </Button>
           </CardContent>
         </Card>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {myTravels.map((travel) => {
-             // Helper to parse preferences
-             const getPreference = (key: string): string | undefined => {
-                 const pref = travel.preferences.find(p => p.startsWith(`${key}:`));
-                 return pref ? pref.split(':').slice(1).join(':') : undefined;
-             };
-             const mood = getPreference('mood');
-             const activity = getPreference('activity');
-             const activityOther = activity?.startsWith('other:') ? activity.substring(6) : undefined;
-             const displayActivity = activityOther ? `Other (${activityOther})` : activity;
+          {myIndividualTravels.map((travel) => {
+             const mood = getPreference(travel.preferences, 'mood');
+             const activityRaw = getPreference(travel.preferences, 'activity');
+             const activityOther = activityRaw?.startsWith('other:') ? activityRaw.substring(6) : undefined;
+             const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
              return (
                 <Card key={travel.id} className="shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col">
                 <CardHeader>
-                    <CardTitle>Trip Plan #{travel.id?.substring(0, 6)}...</CardTitle>
+                    <CardTitle className="flex items-center justify-between">
+                        <span>Trip Plan <span className="font-mono text-xs bg-muted px-1 py-0.5 rounded">#{travel.id?.substring(0, 6)}</span></span>
+                         <User className="h-5 w-5 text-muted-foreground" title="Individual Trip"/>
+                    </CardTitle>
                     <CardDescription>
-                    Created: {travel.createdAt.toDate().toLocaleDateString()}
+                        Created: {travel.createdAt.toDate().toLocaleDateString()}
                     </CardDescription>
-                    {/* Display Date Range or Duration */}
                      {(travel.dateRange) ? (
                         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
                             <Calendar className="h-4 w-4"/>
@@ -579,36 +724,31 @@ export default function MyTravelsPage() {
                          </p>
                      ) : null}
                 </CardHeader>
-                <CardContent className="flex-grow">
-                    {/* Display Mood and Activity */}
-                    <div className="space-y-2">
-                        {mood && (
-                             <p className="text-sm flex items-center gap-1">
-                                 <Smile className="h-4 w-4 text-primary"/> Mood: <span className="font-medium capitalize">{mood}</span>
-                             </p>
-                        )}
-                         {displayActivity && (
-                             <p className="text-sm flex items-center gap-1">
-                                 <Mountain className="h-4 w-4 text-primary"/> Activity: <span className="font-medium capitalize">{displayActivity}</span>
-                             </p>
-                        )}
-                        {/* Display other preferences if needed */}
-                         {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
-                             <div className="mt-1">
-                                <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-1 flex items-center gap-1"><Heart className="h-3 w-3"/>Other Prefs</h4>
-                                <div className="flex flex-wrap gap-1">
-                                 {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).slice(0, 5).map((pref, index) => (
-                                    <span key={index} className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full">{pref}</span>
-                                 ))}
-                                 {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 5 && <span className="text-xs text-muted-foreground">...</span>}
-                                </div>
-                             </div>
-                         )}
-                    </div>
-                    {/* Display Places */}
+                <CardContent className="flex-grow space-y-2">
+                    {mood && (
+                         <p className="text-sm flex items-center gap-1 capitalize">
+                             {getPreferenceIcon('mood', mood)} Mood: <span className="font-medium text-foreground">{mood}</span>
+                         </p>
+                    )}
+                     {activity && (
+                         <p className="text-sm flex items-center gap-1 capitalize">
+                             {getPreferenceIcon('activity', activityRaw)} Activity: <span className="font-medium text-foreground">{activity}</span>
+                         </p>
+                     )}
+                     {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
+                         <div className="flex items-start gap-1 pt-1">
+                            <Heart className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary"/>
+                            <div className="flex flex-wrap gap-1">
+                             {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).slice(0, 5).map((pref, index) => (
+                                <span key={index} className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full">{pref}</span>
+                             ))}
+                             {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 5 && <span className="text-xs text-muted-foreground">...</span>}
+                            </div>
+                         </div>
+                     )}
                     {travel.places && travel.places.length > 0 && (
-                        <div className="mt-3">
-                            <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-1 flex items-center gap-1"><MapPin className="h-3 w-3"/>Places</h4>
+                        <div className="flex items-start gap-1 pt-1">
+                            <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary"/>
                             <div className="flex flex-wrap gap-1">
                                 {travel.places.slice(0, 3).map((place, index) => (
                                     <span key={index} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{place.name}, {place.country}</span>
@@ -617,8 +757,11 @@ export default function MyTravelsPage() {
                             </div>
                         </div>
                     )}
+                    {(!mood && !activity && !(travel.places && travel.places.length > 0) && travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length === 0) && (
+                        <p className="text-sm text-muted-foreground italic">No specific preferences set.</p>
+                    )}
                 </CardContent>
-                <CardFooter className="flex justify-end pt-4">
+                <CardFooter className="flex justify-end pt-4 border-t">
                     <Button variant="outline" size="sm">View Details</Button>
                     {/* Add Edit/Delete later */}
                 </CardFooter>
@@ -630,5 +773,3 @@ export default function MyTravelsPage() {
     </div>
   );
 }
-    
-    
