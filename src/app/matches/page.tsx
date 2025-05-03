@@ -1,3 +1,4 @@
+
 // src/app/matches/page.tsx - Refactored for "My Travels / Plan Trip"
 'use client';
 
@@ -28,6 +29,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow';
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'; // Import form components
 
 // Interfaces (consider moving to a shared types file)
 interface Place {
@@ -291,6 +293,8 @@ export default function MyTravelsPage() {
             setMyIndividualTravels(prev => [...prev, { ...travelToAdd, id: docRef.id, createdAt: travelToAdd.createdAt }]);
        } else {
            // If group trip, navigate to groups page to see the new trip listed there
+           // Consider refreshing the groups page data if staying on the same page
+           // For now, let's assume navigating to groups page implies a fresh load there.
            router.push('/groups');
        }
 
@@ -349,11 +353,12 @@ export default function MyTravelsPage() {
         form.setValue('endDate', null, { shouldValidate: true });
     };
 
-    const handleDateChange = (date: Date | undefined, field: 'startDate' | 'endDate') => {
-        form.setValue(field, date, { shouldValidate: true });
+    // Updated handler for DatePicker within FormField
+    const handleDateChange = (date: Date | undefined, field: ControllerRenderProps<TravelFormValues, 'startDate'> | ControllerRenderProps<TravelFormValues, 'endDate'>) => {
+        field.onChange(date); // Update RHF state
         // If both dates are set, clear durationDays
-        const startDate = field === 'startDate' ? date : form.getValues('startDate');
-        const endDate = field === 'endDate' ? date : form.getValues('endDate');
+        const startDate = form.getValues('startDate');
+        const endDate = form.getValues('endDate');
         if (startDate && endDate) {
             form.setValue('durationDays', undefined, { shouldValidate: false }); // No need to validate here
             setDurationSliderValue([1]); // Reset slider visually
@@ -543,342 +548,377 @@ export default function MyTravelsPage() {
               </DialogDescription>
             </DialogHeader>
 
-            {/* --- Main Form Content --- */}
-            <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4"> {/* Removed py-4, added pt-4 */}
+            {/* --- Wrap with Form Provider --- */}
+             <Form {...form}>
+                <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4">
 
-                 {/* Trip Type Selection */}
-                 <div className="space-y-3">
-                    <Label className="text-lg font-semibold">Trip Type</Label>
-                     <Controller
-                        name="tripType"
+                    {/* Trip Type Selection */}
+                    <FormField
                         control={form.control}
+                        name="tripType"
                         render={({ field }) => (
-                          <RadioGroup
-                            onValueChange={(value) => {
-                                field.onChange(value);
-                                form.setValue('groupId', undefined, { shouldValidate: true }); // Clear group if switching to individual
-                            }}
-                            value={field.value}
-                            className="flex gap-4"
-                            disabled={isSubmitting}
-                          >
-                            <Label htmlFor="individual" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary flex-1 justify-center">
-                              <RadioGroupItem value="individual" id="individual" />
-                              <User className="h-5 w-5 mr-1" /> Individual
-                            </Label>
-                            <Label htmlFor="group" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary flex-1 justify-center">
-                              <RadioGroupItem value="group" id="group" />
-                               <UsersIcon className="h-5 w-5 mr-1" /> Group
-                            </Label>
-                          </RadioGroup>
+                            <FormItem className="space-y-3">
+                                <FormLabel className="text-lg font-semibold">Trip Type</FormLabel>
+                                <FormControl>
+                                    <RadioGroup
+                                        onValueChange={(value) => {
+                                            field.onChange(value);
+                                            form.setValue('groupId', undefined, { shouldValidate: true });
+                                        }}
+                                        value={field.value}
+                                        className="flex gap-4"
+                                        disabled={isSubmitting}
+                                    >
+                                        <FormItem className="flex-1">
+                                            <FormControl>
+                                                <RadioGroupItem value="individual" id="individual" className="sr-only" />
+                                            </FormControl>
+                                            <FormLabel htmlFor="individual" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary justify-center font-normal">
+                                                <User className="h-5 w-5 mr-1" /> Individual
+                                            </FormLabel>
+                                        </FormItem>
+                                         <FormItem className="flex-1">
+                                              <FormControl>
+                                                 <RadioGroupItem value="group" id="group" className="sr-only" />
+                                              </FormControl>
+                                             <FormLabel htmlFor="group" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary justify-center font-normal">
+                                                <UsersIcon className="h-5 w-5 mr-1" /> Group
+                                             </FormLabel>
+                                        </FormItem>
+                                    </RadioGroup>
+                                </FormControl>
+                                <FormMessage />
+                            </FormItem>
                         )}
-                      />
-                       {form.formState.errors.tripType && <p className="text-sm text-destructive text-center">{form.formState.errors.tripType.message}</p>}
-                 </div>
+                    />
 
-                {/* Conditional Group Selector */}
-                {form.watch('tripType') === 'group' && (
-                    <div className="space-y-2">
-                        <Label htmlFor="groupId" className="text-lg font-semibold">Select Group</Label>
-                        <Controller
-                            name="groupId"
+                    {/* Conditional Group Selector */}
+                    {form.watch('tripType') === 'group' && (
+                         <FormField
                             control={form.control}
+                            name="groupId"
                             render={({ field }) => (
-                                <Select
-                                    onValueChange={field.onChange}
-                                    value={field.value} // Use value instead of defaultValue here
-                                    disabled={isSubmitting || loadingGroups}
-                                >
-                                    <SelectTrigger id="groupId" aria-invalid={form.formState.errors.groupId ? 'true' : 'false'}>
-                                        <SelectValue placeholder={loadingGroups ? "Loading groups..." : "Select a group"} />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {loadingGroups ? (
-                                            <SelectItem value="loading" disabled>Loading...</SelectItem>
-                                        ) : myGroups.length === 0 ? (
-                                             <SelectItem value="no-groups" disabled>No groups found</SelectItem>
-                                        ) : (
-                                            <SelectGroup>
-                                                <SelectLabel>Your Groups</SelectLabel>
-                                                {myGroups.map((group) => (
-                                                    <SelectItem key={group.id} value={group.id}>
-                                                        {group.groupName}
-                                                    </SelectItem>
-                                                ))}
-                                            </SelectGroup>
-                                        )}
-                                    </SelectContent>
-                                </Select>
+                                <FormItem>
+                                    <FormLabel className="text-lg font-semibold">Select Group</FormLabel>
+                                    <Select
+                                        onValueChange={field.onChange}
+                                        value={field.value}
+                                        disabled={isSubmitting || loadingGroups}
+                                    >
+                                        <FormControl>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder={loadingGroups ? "Loading groups..." : "Select a group"} />
+                                            </SelectTrigger>
+                                        </FormControl>
+                                        <SelectContent>
+                                            {loadingGroups ? (
+                                                <SelectItem value="loading" disabled>Loading...</SelectItem>
+                                            ) : myGroups.length === 0 ? (
+                                                <SelectItem value="no-groups" disabled>No groups found</SelectItem>
+                                            ) : (
+                                                <SelectGroup>
+                                                    <SelectLabel>Your Groups</SelectLabel>
+                                                    {myGroups.map((group) => (
+                                                        <SelectItem key={group.id} value={group.id}>
+                                                            {group.groupName}
+                                                        </SelectItem>
+                                                    ))}
+                                                </SelectGroup>
+                                            )}
+                                        </SelectContent>
+                                    </Select>
+                                    <FormMessage />
+                                     <p className="text-xs text-muted-foreground pt-1">Plan this trip with one of your existing groups.</p>
+                                </FormItem>
                             )}
                         />
-                        {form.formState.errors.groupId && <p className="text-sm text-destructive">{form.formState.errors.groupId.message}</p>}
-                         <p className="text-xs text-muted-foreground">Plan this trip with one of your existing groups.</p>
-                    </div>
-                )}
+                    )}
 
+                    {/* Emotional Planning Section (Tabs) */}
+                    <FormField
+                        control={form.control}
+                        name="planningMode"
+                        render={({ field }) => (
+                            <FormItem className="mt-2 border-t pt-6">
+                                 <FormLabel className="text-lg font-semibold mb-3 block">Trip Preferences</FormLabel>
+                                <FormControl>
+                                    <Tabs value={field.value} onValueChange={field.onChange} className="w-full">
+                                         <TabsList className="grid w-full grid-cols-2">
+                                            <TabsTrigger value="guided"><SlidersHorizontal className="mr-2 h-4 w-4"/>Guided</TabsTrigger>
+                                            <TabsTrigger value="ai"><Wand2 className="mr-2 h-4 w-4"/>AI Assistant</TabsTrigger>
+                                         </TabsList>
 
-              {/* Emotional Planning Section (Tabs) */}
-              <Controller
-                  name="planningMode"
-                  control={form.control}
-                  render={({ field }) => (
-                    <Tabs value={field.value} onValueChange={field.onChange} className="w-full mt-2 border-t pt-6">
-                      <Label className="text-lg font-semibold mb-3 block">Trip Preferences</Label>
-                      <TabsList className="grid w-full grid-cols-2">
-                        <TabsTrigger value="guided"><SlidersHorizontal className="mr-2 h-4 w-4"/>Guided</TabsTrigger>
-                        <TabsTrigger value="ai"><Wand2 className="mr-2 h-4 w-4"/>AI Assistant</TabsTrigger>
-                      </TabsList>
-
-                      {/* --- Mode 1: Guided Planning --- */}
-                      <TabsContent value="guided" className="mt-6 space-y-6">
-                             {/* Mood Slider */}
-                            <div className="space-y-3">
-                              <Label htmlFor="mood-slider" className="flex items-center gap-1 text-base font-semibold"><Smile className="h-5 w-5"/>Mood</Label>
-                              <Controller
-                                name="mood"
-                                control={form.control}
-                                render={({ field }) => ( // Field is implicitly handled by slider interaction now
-                                    <>
-                                    <Slider
-                                        id="mood-slider"
-                                        min={0}
-                                        max={MOOD_OPTIONS.length - 1}
-                                        step={1}
-                                        value={[moodSliderValue]}
-                                        onValueChange={handleMoodSliderChange}
-                                        className={cn("w-[95%] mx-auto pt-2")}
-                                        disabled={isSubmitting}
-                                        aria-label="Select Mood"
-                                     />
-                                     <div className="flex justify-between text-xs text-muted-foreground px-2">
-                                        {MOOD_OPTIONS.map((opt, index) => (
-                                             <span key={opt.value} className={cn(index === moodSliderValue && "font-bold text-primary")}>
-                                                 {opt.label}
-                                            </span>
-                                        ))}
-                                     </div>
-                                     <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
-                                         {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
-                                     </p>
-                                    </>
-                                )}
-                              />
-                              {form.formState.errors.mood?.type !== 'refine' && form.formState.errors.mood && <p className="text-sm text-destructive text-center">{form.formState.errors.mood.message}</p>}
-                            </div>
-
-                            {/* Activity Slider */}
-                            <div className="space-y-3">
-                                <Label htmlFor="activity-slider" className="flex items-center gap-1 text-base font-semibold"><Mountain className="h-5 w-5"/>Activity</Label>
-                                <Controller
-                                    name="activity"
-                                    control={form.control}
-                                    render={({ field }) => (
-                                        <>
-                                         <Slider
-                                             id="activity-slider"
-                                             min={0}
-                                             max={ACTIVITY_OPTIONS.length - 1}
-                                             step={1}
-                                             value={[activitySliderValue]}
-                                             onValueChange={handleActivitySliderChange}
-                                             className={cn("w-[95%] mx-auto pt-2")}
-                                             disabled={isSubmitting}
-                                             aria-label="Select Activity"
-                                         />
-                                         <div className="flex justify-between text-xs text-muted-foreground px-2">
-                                             {ACTIVITY_OPTIONS.map((opt, index) => (
-                                                 <span key={opt.value} className={cn(index === activitySliderValue && "font-bold text-primary")}>
-                                                     {opt.label}
-                                                 </span>
-                                             ))}
-                                         </div>
-                                         <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
-                                             {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
-                                         </p>
-                                        </>
-                                    )}
-                                />
-                                {form.watch('activity') === 'other' && (
-                                    <div className="px-4 space-y-1">
-                                        <Label htmlFor="activityOther">Describe "Other" Activity</Label>
-                                        <Input
-                                            id="activityOther"
-                                            placeholder="e.g., Volunteering, Language course"
-                                            {...form.register('activityOther')}
-                                            disabled={isSubmitting}
-                                            aria-invalid={form.formState.errors.activityOther ? 'true' : 'false'}
-                                        />
-                                        {form.formState.errors.activityOther && <p className="text-sm text-destructive">{form.formState.errors.activityOther.message}</p>}
-                                    </div>
-                                )}
-                                 {form.formState.errors.activity && <p className="text-sm text-destructive text-center">{form.formState.errors.activity.message}</p>}
-                            </div>
-
-                             {/* Duration Slider OR Date Range Picker */}
-                            <div className="space-y-3">
-                                 <Label className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Duration / Dates</Label>
-                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
-                                    <div className="space-y-2">
-                                        <Label htmlFor="startDate">Start Date</Label>
-                                        <Controller
-                                            name="startDate"
-                                            control={form.control}
-                                            render={({ field }) => (
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                    <Button
-                                                        variant={"outline"}
-                                                        className={cn(
-                                                        "w-full justify-start text-left font-normal",
-                                                        !field.value && "text-muted-foreground"
-                                                        )}
-                                                        disabled={isSubmitting}
-                                                    >
-                                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                                    </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0">
-                                                    <ShadCalendar
-                                                        mode="single"
-                                                        selected={field.value ?? undefined}
-                                                        onSelect={(date) => handleDateChange(date, 'startDate')}
-                                                        initialFocus
-                                                    />
-                                                    </PopoverContent>
-                                                </Popover>
-                                            )}
-                                        />
-                                        {form.formState.errors.startDate && <p className="text-sm text-destructive">{form.formState.errors.startDate.message}</p>}
-                                    </div>
-                                    <div className="space-y-2">
-                                        <Label htmlFor="endDate">End Date</Label>
-                                         <Controller
-                                            name="endDate"
-                                            control={form.control}
-                                            render={({ field }) => (
-                                                <Popover>
-                                                    <PopoverTrigger asChild>
-                                                    <Button
-                                                        variant={"outline"}
-                                                        className={cn(
-                                                        "w-full justify-start text-left font-normal",
-                                                        !field.value && "text-muted-foreground"
-                                                        )}
-                                                        disabled={isSubmitting || !form.watch('startDate')}
-                                                    >
-                                                        <CalendarIcon className="mr-2 h-4 w-4" />
-                                                        {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
-                                                    </Button>
-                                                    </PopoverTrigger>
-                                                    <PopoverContent className="w-auto p-0">
-                                                    <ShadCalendar
-                                                        mode="single"
-                                                        selected={field.value ?? undefined}
-                                                        onSelect={(date) => handleDateChange(date, 'endDate')}
-                                                        disabled={(date) =>
-                                                            form.watch('startDate') ? date < form.watch('startDate')! : false
-                                                        }
-                                                        initialFocus
-                                                    />
-                                                    </PopoverContent>
-                                                </Popover>
-                                            )}
-                                        />
-                                        {form.formState.errors.endDate && <p className="text-sm text-destructive">{form.formState.errors.endDate.message}</p>}
-                                    </div>
-                                 </div>
-
-                                <div className="space-y-3 pt-4">
-                                     <Label htmlFor="duration-slider" className="text-center block text-sm text-muted-foreground">Or select approximate duration</Label>
-                                     <Controller
-                                        name="durationDays"
-                                        control={form.control}
-                                        render={({ field }) => (
-                                            <>
-                                            <Slider
-                                                id="duration-slider"
-                                                min={1}
-                                                max={MAX_DURATION_DAYS}
-                                                step={1}
-                                                value={durationSliderValue}
-                                                onValueChange={handleDurationSliderChange}
-                                                className={cn("w-[95%] mx-auto")}
-                                                disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))}
-                                                aria-label="Select Duration in Days"
+                                         {/* --- Mode 1: Guided Planning --- */}
+                                         <TabsContent value="guided" className="mt-6 space-y-6">
+                                             {/* Mood Slider */}
+                                             <FormField
+                                                control={form.control}
+                                                name="mood"
+                                                render={({ field }) => (
+                                                    <FormItem>
+                                                        <FormLabel className="flex items-center gap-1 text-base font-semibold"><Smile className="h-5 w-5"/>Mood</FormLabel>
+                                                        <FormControl>
+                                                            <>
+                                                                <Slider
+                                                                    id="mood-slider"
+                                                                    min={0}
+                                                                    max={MOOD_OPTIONS.length - 1}
+                                                                    step={1}
+                                                                    value={[moodSliderValue]}
+                                                                    onValueChange={handleMoodSliderChange}
+                                                                    className={cn("w-[95%] mx-auto pt-2")}
+                                                                    disabled={isSubmitting}
+                                                                    aria-label="Select Mood"
+                                                                />
+                                                                <div className="flex justify-between text-xs text-muted-foreground px-2">
+                                                                    {MOOD_OPTIONS.map((opt, index) => (
+                                                                        <span key={opt.value} className={cn(index === moodSliderValue && "font-bold text-primary")}>
+                                                                            {opt.label}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                                <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
+                                                                    {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
+                                                                </p>
+                                                            </>
+                                                        </FormControl>
+                                                         <FormMessage />
+                                                    </FormItem>
+                                                )}
                                             />
-                                            <p className="text-center text-lg font-medium mt-2">
-                                                {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
-                                            </p>
-                                            </>
-                                        )}
-                                    />
-                                   {form.formState.errors.durationDays && <p className="text-sm text-destructive text-center">{form.formState.errors.durationDays.message}</p>}
-                                </div>
-                            </div>
-                             {/* General Error Message for missing fields in guided mode */}
-                             {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
-                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
-                             )}
-                      </TabsContent>
 
-                      {/* --- Mode 2: AI Assistant --- */}
-                      <TabsContent value="ai">
-                         <div className="flex flex-col h-[50vh]"> {/* Set fixed height */}
-                             <Label className="text-base font-semibold mb-2 flex items-center gap-1"><Bot className="h-5 w-5"/>AI Travel Assistant</Label>
-                             <ScrollArea className="flex-grow border rounded-md p-4 mb-4 bg-muted/50" ref={chatScrollAreaRef}>
-                                 {chatHistory.length === 0 && (
-                                     <p className="text-sm text-muted-foreground text-center py-4">Start chatting with the AI to plan your trip!</p>
-                                 )}
-                                 {chatHistory.map((chat) => (
-                                    <div key={chat.timestamp} className={cn("mb-3 flex", chat.sender === 'user' ? 'justify-end' : 'justify-start')}>
-                                        <div className={cn(
-                                            "rounded-lg p-2 px-3 max-w-[80%] text-sm",
-                                            chat.sender === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground border'
-                                        )}>
-                                            {chat.message}
-                                        </div>
-                                    </div>
-                                 ))}
-                                 {isAiLoading && (
-                                      <div className="mb-3 flex justify-start">
-                                          <div className="rounded-lg p-2 px-3 max-w-[80%] text-sm bg-background text-foreground border italic flex items-center gap-2">
-                                             <Loader2 className="h-4 w-4 animate-spin" /> Thinking...
-                                         </div>
-                                     </div>
-                                 )}
-                                 <div id="end-of-chat"></div> {/* Dummy div for scrolling */}
-                             </ScrollArea>
-                             <form onSubmit={handleAiSubmit} className="flex items-center gap-2"> {/* Wrap input/button in form */}
-                                 <Textarea
-                                     placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week')"
-                                     value={currentUserInput}
-                                     onChange={handleAiInputChange}
-                                     onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiSubmit(); } }}
-                                     className="flex-grow resize-none"
-                                     rows={1}
-                                     disabled={isSubmitting || isAiLoading}
-                                 />
-                                 <Button type="submit" disabled={isSubmitting || isAiLoading || !currentUserInput.trim()} size="icon"> {/* Changed type to submit */}
-                                     <Send className="h-4 w-4"/>
-                                     <span className="sr-only">Send message</span>
-                                 </Button>
-                             </form>
-                         </div>
-                      </TabsContent>
-                    </Tabs>
-                 )}
-                />
+                                             {/* Activity Slider */}
+                                            <FormField
+                                                control={form.control}
+                                                name="activity"
+                                                render={({ field }) => (
+                                                     <FormItem>
+                                                        <FormLabel className="flex items-center gap-1 text-base font-semibold"><Mountain className="h-5 w-5"/>Activity</FormLabel>
+                                                         <FormControl>
+                                                             <>
+                                                                <Slider
+                                                                    id="activity-slider"
+                                                                    min={0}
+                                                                    max={ACTIVITY_OPTIONS.length - 1}
+                                                                    step={1}
+                                                                    value={[activitySliderValue]}
+                                                                    onValueChange={handleActivitySliderChange}
+                                                                    className={cn("w-[95%] mx-auto pt-2")}
+                                                                    disabled={isSubmitting}
+                                                                    aria-label="Select Activity"
+                                                                />
+                                                                <div className="flex justify-between text-xs text-muted-foreground px-2">
+                                                                    {ACTIVITY_OPTIONS.map((opt, index) => (
+                                                                        <span key={opt.value} className={cn(index === activitySliderValue && "font-bold text-primary")}>
+                                                                            {opt.label}
+                                                                        </span>
+                                                                    ))}
+                                                                </div>
+                                                                <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
+                                                                    {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
+                                                                </p>
+                                                             </>
+                                                        </FormControl>
+                                                        {form.watch('activity') === 'other' && (
+                                                             <FormField
+                                                                control={form.control}
+                                                                name="activityOther"
+                                                                render={({ field }) => (
+                                                                    <FormItem className="px-4 space-y-1 pt-2">
+                                                                         <FormLabel>Describe "Other" Activity</FormLabel>
+                                                                         <FormControl>
+                                                                             <Input
+                                                                                placeholder="e.g., Volunteering, Language course"
+                                                                                {...field}
+                                                                                disabled={isSubmitting}
+                                                                            />
+                                                                        </FormControl>
+                                                                        <FormMessage />
+                                                                     </FormItem>
+                                                                )}
+                                                            />
+                                                        )}
+                                                        <FormMessage />
+                                                    </FormItem>
+                                                )}
+                                            />
+
+                                              {/* Duration Slider OR Date Range Picker */}
+                                            <FormItem>
+                                                <FormLabel className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Duration / Dates</FormLabel>
+                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
+                                                     <FormField
+                                                        control={form.control}
+                                                        name="startDate"
+                                                        render={({ field }) => (
+                                                            <FormItem className="flex flex-col space-y-2">
+                                                                <FormLabel>Start Date</FormLabel>
+                                                                <Popover>
+                                                                    <PopoverTrigger asChild>
+                                                                        <FormControl>
+                                                                            <Button
+                                                                                variant={"outline"}
+                                                                                className={cn(
+                                                                                    "w-full justify-start text-left font-normal",
+                                                                                    !field.value && "text-muted-foreground"
+                                                                                )}
+                                                                                disabled={isSubmitting}
+                                                                            >
+                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                                            </Button>
+                                                                        </FormControl>
+                                                                    </PopoverTrigger>
+                                                                    <PopoverContent className="w-auto p-0">
+                                                                         <ShadCalendar
+                                                                            mode="single"
+                                                                            selected={field.value ?? undefined}
+                                                                            onSelect={(date) => handleDateChange(date, field)} // Pass field object
+                                                                            initialFocus
+                                                                        />
+                                                                    </PopoverContent>
+                                                                </Popover>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}
+                                                     />
+                                                     <FormField
+                                                        control={form.control}
+                                                        name="endDate"
+                                                        render={({ field }) => (
+                                                            <FormItem className="flex flex-col space-y-2">
+                                                                <FormLabel>End Date</FormLabel>
+                                                                <Popover>
+                                                                     <PopoverTrigger asChild>
+                                                                         <FormControl>
+                                                                             <Button
+                                                                                variant={"outline"}
+                                                                                className={cn(
+                                                                                    "w-full justify-start text-left font-normal",
+                                                                                    !field.value && "text-muted-foreground"
+                                                                                )}
+                                                                                disabled={isSubmitting || !form.watch('startDate')}
+                                                                            >
+                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                {field.value ? format(field.value, "PPP") : <span>Pick a date</span>}
+                                                                            </Button>
+                                                                        </FormControl>
+                                                                    </PopoverTrigger>
+                                                                    <PopoverContent className="w-auto p-0">
+                                                                         <ShadCalendar
+                                                                            mode="single"
+                                                                            selected={field.value ?? undefined}
+                                                                            onSelect={(date) => handleDateChange(date, field)} // Pass field object
+                                                                            disabled={(date) =>
+                                                                                form.watch('startDate') ? date < form.watch('startDate')! : false
+                                                                            }
+                                                                            initialFocus
+                                                                        />
+                                                                    </PopoverContent>
+                                                                </Popover>
+                                                                <FormMessage />
+                                                            </FormItem>
+                                                        )}
+                                                     />
+                                                </div>
+                                                 <FormField
+                                                    control={form.control}
+                                                    name="durationDays"
+                                                    render={({ field }) => (
+                                                         <FormItem className="pt-4 space-y-3">
+                                                             <FormLabel className="text-center block text-sm text-muted-foreground">Or select approximate duration</FormLabel>
+                                                             <FormControl>
+                                                                <>
+                                                                    <Slider
+                                                                        id="duration-slider"
+                                                                        min={1}
+                                                                        max={MAX_DURATION_DAYS}
+                                                                        step={1}
+                                                                        value={durationSliderValue}
+                                                                        onValueChange={handleDurationSliderChange}
+                                                                        className={cn("w-[95%] mx-auto")}
+                                                                        disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))}
+                                                                        aria-label="Select Duration in Days"
+                                                                    />
+                                                                    <p className="text-center text-lg font-medium mt-2">
+                                                                        {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
+                                                                    </p>
+                                                                </>
+                                                            </FormControl>
+                                                            <FormMessage />
+                                                        </FormItem>
+                                                    )}
+                                                />
+                                            </FormItem>
 
 
-                <DialogFooter>
-                    <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-                    <Button type="submit" disabled={isSubmitting || isAiLoading}>
-                    {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
-                    </Button>
-                </DialogFooter>
-            </form>
+                                             {/* General Error Message for missing fields in guided mode */}
+                                             {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
+                                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
+                                             )}
+                                         </TabsContent>
+
+                                         {/* --- Mode 2: AI Assistant --- */}
+                                        <TabsContent value="ai">
+                                            <div className="flex flex-col h-[50vh]"> {/* Set fixed height */}
+                                                 <Label className="text-base font-semibold mb-2 flex items-center gap-1"><Bot className="h-5 w-5"/>AI Travel Assistant</Label>
+                                                <ScrollArea className="flex-grow border rounded-md p-4 mb-4 bg-muted/50" ref={chatScrollAreaRef}>
+                                                    {chatHistory.length === 0 && (
+                                                        <p className="text-sm text-muted-foreground text-center py-4">Start chatting with the AI to plan your trip!</p>
+                                                    )}
+                                                    {chatHistory.map((chat) => (
+                                                        <div key={chat.timestamp} className={cn("mb-3 flex", chat.sender === 'user' ? 'justify-end' : 'justify-start')}>
+                                                            <div className={cn(
+                                                                "rounded-lg p-2 px-3 max-w-[80%] text-sm",
+                                                                chat.sender === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground border'
+                                                            )}>
+                                                                {chat.message}
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {isAiLoading && (
+                                                        <div className="mb-3 flex justify-start">
+                                                            <div className="rounded-lg p-2 px-3 max-w-[80%] text-sm bg-background text-foreground border italic flex items-center gap-2">
+                                                                <Loader2 className="h-4 w-4 animate-spin" /> Thinking...
+                                                            </div>
+                                                        </div>
+                                                    )}
+                                                    <div id="end-of-chat"></div> {/* Dummy div for scrolling */}
+                                                </ScrollArea>
+                                                {/* AI Input - no need for FormField as it's handled separately */}
+                                                 <div className="flex items-center gap-2">
+                                                     <Textarea
+                                                         placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week')"
+                                                         value={currentUserInput}
+                                                         onChange={handleAiInputChange}
+                                                         onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiSubmit(); } }}
+                                                         className="flex-grow resize-none"
+                                                         rows={1}
+                                                         disabled={isSubmitting || isAiLoading}
+                                                     />
+                                                     <Button type="button" onClick={() => handleAiSubmit()} disabled={isSubmitting || isAiLoading || !currentUserInput.trim()} size="icon"> {/* Changed type to button and onClick */}
+                                                         <Send className="h-4 w-4"/>
+                                                         <span className="sr-only">Send message</span>
+                                                     </Button>
+                                                 </div>
+                                            </div>
+                                        </TabsContent>
+                                    </Tabs>
+                                </FormControl>
+                                <FormMessage /> {/* For planningMode validation errors */}
+                            </FormItem>
+                        )}
+                    />
+
+                    <DialogFooter>
+                        <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
+                        <Button type="submit" disabled={isSubmitting || isAiLoading}>
+                        {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
+                        </Button>
+                    </DialogFooter>
+                </form>
+            </Form>
           </DialogContent>
         </Dialog>
       </div>
@@ -994,3 +1034,5 @@ export default function MyTravelsPage() {
     </div>
   );
 }
+
+            
