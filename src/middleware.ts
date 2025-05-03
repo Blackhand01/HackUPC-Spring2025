@@ -7,7 +7,7 @@ const publicRoutes = ['/login', '/register', '/forgot-password', '/'];
 // Define routes that authenticated users should be redirected away from
 const authRoutes = ['/login', '/register', '/forgot-password'];
 // Define routes that require authentication
-const protectedRoutes = ['/matches', '/groups', '/properties']; // Added /properties
+const protectedRoutes = ['/matches', '/groups', '/properties', '/profile']; // Added /profile
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
