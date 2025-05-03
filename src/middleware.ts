@@ -11,14 +11,10 @@ const protectedRoutes = ['/matches', '/groups', '/properties']; // Added /proper
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
-  const sessionToken = request.cookies.get('sessionToken')?.value; // Example: Check for a session token cookie
+  const sessionToken = request.cookies.get('sessionToken')?.value; // Check for a session token cookie
 
-  // Simulate authentication check based on the presence of a token (replace with actual validation)
-  const isAuthenticated = !!sessionToken; // Basic check, replace with actual validation logic
-
-  // Add logging for debugging
-  // console.log(`Middleware: Pathname: ${pathname}, sessionToken present: ${!!sessionToken}, isAuthenticated: ${isAuthenticated}`);
-
+  // Simulate authentication check based on the presence of a token
+  const isAuthenticated = !!sessionToken; // Basic check based on cookie presence
 
   const isPublicRoute = publicRoutes.includes(pathname);
   const isAuthRoute = authRoutes.includes(pathname);
@@ -27,14 +23,14 @@ export function middleware(request: NextRequest) {
   // If the user is authenticated and trying to access an auth route (login/register),
   // redirect them to the homepage (/)
   if (isAuthenticated && isAuthRoute) {
-    console.log(`Authenticated user accessing auth route ${pathname}, redirecting to /`);
+    // console.log(`Authenticated user accessing auth route ${pathname}, redirecting to /`);
     return NextResponse.redirect(new URL('/', request.url));
   }
 
   // If the user is not authenticated and trying to access a protected route,
   // redirect them to the login page.
   if (!isAuthenticated && isProtectedRoute) {
-    console.log(`Unauthenticated user accessing protected route ${pathname}, redirecting to /login`);
+    // console.log(`Unauthenticated user accessing protected route ${pathname}, redirecting to /login`);
     const loginUrl = new URL('/login', request.url);
     // Optionally add a redirect query parameter
     loginUrl.searchParams.set('redirectedFrom', pathname); // Add redirect info
@@ -42,7 +38,6 @@ export function middleware(request: NextRequest) {
   }
 
   // Allow the request to proceed if none of the above conditions are met
-  // console.log(`Allowing request to ${pathname}`); // Commented out for less console noise
   return NextResponse.next();
 }
 
