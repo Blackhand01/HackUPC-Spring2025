@@ -1,14 +1,34 @@
+'use client';
+
+import { useState, useEffect } from 'react'; // Import useEffect
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Users } from 'lucide-react';
+import { useRouter } from 'next/navigation'; // Import useRouter
+import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 export default function GroupsPage() {
+  const router = useRouter(); // Initialize useRouter
+  const { isAuthenticated, user } = useAuth(); // Get authentication state and user
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated && user === null) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, user, router]);
+
   // Placeholder data - Replace with actual group data fetching
   const groups = [
     { id: '1', name: 'Summer Europe Trip', members: 4, destination: 'Paris, France' },
     { id: '2', name: 'Ski Weekend Crew', members: 6, destination: 'Aspen, CO' },
     { id: '3', name: 'Asia Adventure', members: 3, destination: 'Tokyo, Japan' },
   ];
+
+  // Render null or a loading state while checking authentication
+  if (!isAuthenticated && user === null) {
+    return <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">Loading...</div>; // Or a loading spinner
+  }
 
   return (
     <div className="container mx-auto py-12 px-4">

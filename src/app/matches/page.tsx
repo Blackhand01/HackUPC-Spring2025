@@ -1,7 +1,7 @@
 // src/app/matches/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Import useEffect
 import { useForm, SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -13,6 +13,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Loader2, Sparkles, MapPin, Calendar, Leaf, AlertTriangle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { useRouter } from 'next/navigation'; // Import useRouter
+import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 const matchesSchema = z.object({
   userPreferences: z.string().min(10, { message: 'Please describe your preferences (destinations, activities).' }),
@@ -27,6 +29,16 @@ export default function MatchesPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [matchesResult, setMatchesResult] = useState<GenerateTravelMatchesOutput | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  const router = useRouter(); // Initialize useRouter
+  const { isAuthenticated, user } = useAuth(); // Get authentication state and user
+
+  // Redirect if not authenticated
+  useEffect(() => {
+    if (!isAuthenticated && user === null) {
+      router.push('/login');
+    }
+  }, [isAuthenticated, user, router]);
 
   const form = useForm<MatchesFormValues>({
     resolver: zodResolver(matchesSchema),
@@ -66,6 +78,11 @@ export default function MatchesPage() {
       setIsLoading(false); // Ensure loading is stopped regardless of success or failure
     }
   };
+
+   // Render null or a loading state while checking authentication
+  if (!isAuthenticated && user === null) {
+    return <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">Loading...</div>; // Or a loading spinner
+  }
 
   return (
     <div className="container mx-auto py-12 px-4 max-w-4xl">

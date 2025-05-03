@@ -1,87 +1,89 @@
+"use client";
 // src/context/AuthContext.tsx
-'use client';
-
-import React, { createContext, useState, useContext, ReactNode, useEffect } from 'react';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { setCookie, deleteCookie, getCookie } from 'cookies-next'; // Assuming you are using cookies-next
+import { auth } from '@/lib/firebase'; // Import your initialized Firebase auth instance
+import {
+  createUserWithEmailAndPassword,
+  signInWithEmailAndPassword,
+  signOut,
+  onAuthStateChanged,
+  User // Import User type if needed for type hinting
+} from 'firebase/auth';
 
 interface AuthContextType {
   isAuthenticated: boolean;
-  login: () => void;
-  logout: () => void;
+  user: User | null; // Add user to context
+  login: (email: string, password: string) => Promise<void>;
+  signup: (email: string, password: string) => Promise<void>; // Add signup function
+  logout: () => Promise<void>; // Logout should also return a Promise
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-// Helper function to set a cookie
-const setCookie = (name: string, value: string, days: number) => {
-  if (typeof window === 'undefined') return; // Ensure running on client
-  let expires = "";
-  if (days) {
-    const date = new Date();
-    date.setTime(date.getTime() + (days * 24 * 60 * 60 * 1000));
-    expires = "; expires=" + date.toUTCString();
-  }
-  document.cookie = name + "=" + (value || "") + expires + "; path=/";
-};
+export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [user, setUser] = useState<User | null>(null); // State to hold the authenticated user
 
-// Helper function to delete a cookie
-const deleteCookie = (name: string) => {
-   if (typeof window === 'undefined') return; // Ensure running on client
-  // Set the cookie to expire in the past
-  document.cookie = name + '=; Max-Age=-99999999; path=/';
-};
-
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => {
-    if (typeof window !== 'undefined') {
-      // Check cookie first for server/client consistency in middleware
-      const cookieExists = document.cookie.split(';').some((item) => item.trim().startsWith('sessionToken='));
-      if (cookieExists) return true;
-
-      // Fallback to localStorage (primarily for client-side persistence if cookie logic fails)
-      const storedAuthState = localStorage.getItem('isAuthenticated');
-      if (storedAuthState) {
-         const parsedState = JSON.parse(storedAuthState);
-         // If localStorage says authenticated but cookie doesn't exist, update cookie
-         if(parsedState) setCookie('sessionToken', 'simulated-token', 1); // Set cookie if localStorage says logged in
-         return parsedState;
-      }
-       // If neither cookie nor localStorage indicates authentication, ensure cookie is removed
-       deleteCookie('sessionToken');
-    }
-    return false; // Default to false during SSR or if neither state exists
-  });
-
-  // Update localStorage whenever isAuthenticated changes (client-side only)
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('isAuthenticated', JSON.stringify(isAuthenticated));
-       // Ensure cookie matches state
-       if (isAuthenticated && !document.cookie.split(';').some((item) => item.trim().startsWith('sessionToken='))) {
-         setCookie('sessionToken', 'simulated-token', 1); // Set if state is true but cookie missing
-       } else if (!isAuthenticated && document.cookie.split(';').some((item) => item.trim().startsWith('sessionToken='))) {
-          deleteCookie('sessionToken'); // Delete if state is false but cookie exists
-       }
-    }
-  }, [isAuthenticated]);
+    // Listen for changes in authentication state
+    const unsubscribe = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        // User is signed in
+        setIsAuthenticated(true);
+        setUser(user);
+        // Set a session cookie to be read by the middleware
+        if (typeof window !== 'undefined') {
+           setCookie('sessionToken', user.uid, { path: '/', sameSite: 'lax' }); // Uncommented and added options
+           localStorage.setItem('isAuthenticated', 'true');
+        }
+      } else {
+        // User is signed out
+        setIsAuthenticated(false);
+        setUser(null);
+        if (typeof window !== 'undefined') {
+           deleteCookie('sessionToken', { path: '/' }); // Ensure path is correct for deletion
+           localStorage.removeItem('isAuthenticated');
+        }
+      }
+    });
 
-  const login = () => {
-    console.log("Setting isAuthenticated to true and setting cookie");
-    setCookie('sessionToken', 'simulated-token', 1); // Set a dummy session token cookie for middleware check
-    setIsAuthenticated(true);
+    // Clean up the listener on unmount
+    return () => unsubscribe();
+  }, []);
+
+  const signup = async (email: string, password: string) => {
+    try {
+      await createUserWithEmailAndPassword(auth, email, password);
+      // User signed up and logged in automatically by Firebase
+    } catch (error: any) {
+      console.error("Error signing up:", error.message);
+      throw error; // Re-throw the error to be handled by the calling component
+    }
   };
 
-  const logout = () => {
-    console.log("Setting isAuthenticated to false and removing cookie");
-    deleteCookie('sessionToken'); // Remove the session token cookie
-    setIsAuthenticated(false);
-    if (typeof window !== 'undefined') {
-      localStorage.removeItem('isAuthenticated');
+  const login = async (email: string, password: string) => {
+    try {
+      await signInWithEmailAndPassword(auth, email, password);
+      // User logged in
+    } catch (error: any) {
+      console.error("Error logging in:", error.message);
+      throw error; // Re-throw the error
+    }
+  };
+
+  const logout = async () => {
+    try {
+      await signOut(auth);
+      // User logged out
+    } catch (error: any) {
+      console.error("Error logging out:", error.message);
+      throw error; // Re-throw the error
     }
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, user, login, signup, logout }}>
       {children}
     </AuthContext.Provider>
   );

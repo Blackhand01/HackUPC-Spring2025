@@ -15,7 +15,7 @@ import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
-  password: z.string().min(1, { message: 'Password is required.' }), // Basic check, server should verify length
+  password: z.string().min(6, { message: 'Password must be at least 6 characters.' }), // Updated minimum length for Firebase
 });
 
 type LoginFormValues = z.infer<typeof loginSchema>;
@@ -37,30 +37,25 @@ export default function LoginPage() {
 
   const onSubmit: SubmitHandler<LoginFormValues> = async (data) => {
     setIsLoading(true);
-    console.log('Login data:', data); // Replace with actual login logic
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    // Simulate success/failure
-    const loginSuccess = Math.random() > 0.2; // 80% success rate
-
-    setIsLoading(false);
-
-    if (loginSuccess) {
+    try {
+      await login(data.email, data.password);
+      // If login is successful, the AuthContext will handle state update and redirect
       toast({
         title: 'Login Successful!',
         description: 'Welcome back to OnlyFly.',
       });
-      login(); // Update authentication state
-      router.push('/'); // Redirect user to homepage on success
-      // form.reset(); // Reset form removed, as we are redirecting
-    } else {
+      // Redirecting is handled by AuthContext or a listener depending on your setup
+      // If not, you can uncomment the line below
+      router.push('/');
+    } catch (error: any) {
        toast({
         title: 'Login Failed',
-        description: 'Invalid email or password. Please try again.',
+        description: error.message || 'An unexpected error occurred. Please try again.',
         variant: 'destructive',
       });
+    } finally {
+      setIsLoading(false);
     }
   };
 

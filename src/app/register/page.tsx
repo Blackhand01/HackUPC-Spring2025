@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { useRouter } from 'next/navigation'; // Import useRouter
+import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 const registerSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -27,6 +29,8 @@ export default function RegisterPage() {
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
+  const router = useRouter(); // Initialize useRouter
+  const { signup } = useAuth(); // Get the signup function from context
 
   const form = useForm<RegisterFormValues>({
     resolver: zodResolver(registerSchema),
@@ -39,18 +43,26 @@ export default function RegisterPage() {
 
   const onSubmit: SubmitHandler<RegisterFormValues> = async (data) => {
     setIsLoading(true);
-    console.log('Registration data:', data); // Replace with actual registration logic
 
-    // Simulate API call
-    await new Promise((resolve) => setTimeout(resolve, 1500));
-
-    setIsLoading(false);
-    toast({
-      title: 'Registration Successful!',
-      description: 'Welcome to OnlyFly. Please check your email for verification.',
-    });
-    // Redirect user or clear form
-    form.reset();
+    try {
+      await signup(data.email, data.password);
+      // If signup is successful, Firebase automatically logs the user in
+      // and onAuthStateChanged listener in AuthContext will handle state
+      toast({
+        title: 'Registration Successful!',
+        description: 'Welcome to OnlyFly.',
+      });
+      // Redirect user to homepage after successful registration
+      router.push('/');
+    } catch (error: any) {
+       toast({
+        title: 'Registration Failed',
+        description: error.message || 'An unexpected error occurred. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsLoading(false);
+    }
   };
 
    const togglePasswordVisibility = () => setShowPassword(!showPassword);
@@ -73,6 +85,7 @@ export default function RegisterPage() {
                 placeholder="you@example.com"
                 {...form.register('email')}
                 aria-invalid={form.formState.errors.email ? 'true' : 'false'}
+                 disabled={isLoading}
               />
               {form.formState.errors.email && (
                 <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
@@ -86,6 +99,7 @@ export default function RegisterPage() {
                 placeholder="••••••••"
                 {...form.register('password')}
                 aria-invalid={form.formState.errors.password ? 'true' : 'false'}
+                 disabled={isLoading}
               />
               <Button
                 type="button"
@@ -94,6 +108,7 @@ export default function RegisterPage() {
                 className="absolute right-1 top-7 h-7 w-7"
                 onClick={togglePasswordVisibility}
                 aria-label={showPassword ? "Hide password" : "Show password"}
+                 disabled={isLoading}
               >
                 {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
               </Button>
@@ -109,6 +124,7 @@ export default function RegisterPage() {
                 placeholder="••••••••"
                 {...form.register('confirmPassword')}
                 aria-invalid={form.formState.errors.confirmPassword ? 'true' : 'false'}
+                 disabled={isLoading}
               />
               <Button
                  type="button"
@@ -117,6 +133,7 @@ export default function RegisterPage() {
                  className="absolute right-1 top-7 h-7 w-7"
                  onClick={toggleConfirmPasswordVisibility}
                  aria-label={showConfirmPassword ? "Hide confirm password" : "Show confirm password"}
+                  disabled={isLoading}
                >
                  {showConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                </Button>

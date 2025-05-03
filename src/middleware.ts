@@ -16,6 +16,10 @@ export function middleware(request: NextRequest) {
   // Simulate authentication check based on the presence of a token (replace with actual validation)
   const isAuthenticated = !!sessionToken; // Basic check, replace with actual validation logic
 
+  // Add logging for debugging
+  console.log(`Middleware: Pathname: ${pathname}, sessionToken present: ${!!sessionToken}, isAuthenticated: ${isAuthenticated}`);
+
+
   const isPublicRoute = publicRoutes.includes(pathname);
   const isAuthRoute = authRoutes.includes(pathname);
   const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route)); // Check if route starts with a protected path
