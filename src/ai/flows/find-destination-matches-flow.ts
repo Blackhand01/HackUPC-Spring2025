@@ -23,7 +23,7 @@ const FindDestinationMatchesInputSchema = z.object({
   departureCityIata: z.string().min(3).max(3).describe("IATA code of the departure city (e.g., 'TRN')."),
   preferredStartDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Preferred start date (YYYY-MM-DD)."),
   preferredEndDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).describe("Preferred end date (YYYY-MM-DD)."),
-  candidateDestinationIatas: z.array(z.string().min(3).max(3)).min(1).describe("List of candidate destination IATA codes (e.g., ['BCN', 'LIS'])."),
+  candidateDestinationIatas: z.array(z.string().min(3).max(3)).min(1).describe("List of candidate destination IATA codes based on available properties (e.g., ['BCN', 'LIS'])."), // Updated description
 });
 export type FindDestinationMatchesInput = z.infer<typeof FindDestinationMatchesInputSchema>;
 
@@ -94,21 +94,22 @@ const findDestinationMatchesFlow = ai.defineFlow<
       departureCityIata,
       preferredStartDate,
       preferredEndDate,
-      candidateDestinationIatas,
+      candidateDestinationIatas, // Now explicitly receives candidates derived from properties
     } = input;
 
     // --- Step 2: Semantic Matching with Gemini ---
     let affinityScores: { [iata: string]: number } = {};
     try {
-        // Construct the dynamic prompt for Gemini
+        // Construct the dynamic prompt for Gemini using the provided candidate list
         const moodText = moodPreferences.length > 0 ? `Their mood preferences are: ${moodPreferences.join(', ')}.` : '';
         const activityText = activityPreferences.length > 0 ? `Activities they enjoy: ${activityPreferences.join(', ')}.` : '';
         const durationText = durationDays ? `The user wants to travel for about ${durationDays} days.` : 'The user has specified a date range.';
-        const candidateListString = JSON.stringify(candidateDestinationIatas);
+        const candidateListString = JSON.stringify(candidateDestinationIatas); // Use the list from input
 
         const geminiPromptText = `${durationText} ${moodText} ${activityText}
-Rank these candidate destinations by best thematic and experiential fit: ${candidateListString}
-Return JSON array with scores (0 to 1) for each candidate destination, like [{"destination": "BCN", "score": 0.92}, ...]. Only include destinations from the provided list.`;
+Rank ONLY these candidate destinations by best thematic and experiential fit: ${candidateListString}
+These destinations represent locations where house swaps are potentially available.
+Return JSON array with scores (0 to 1) for each candidate destination provided, like [{"destination": "BCN", "score": 0.92}, ...]. Only include destinations from the provided list.`;
 
         console.log("Sending prompt to Gemini:", geminiPromptText);
 
