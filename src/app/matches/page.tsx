@@ -85,20 +85,14 @@ const travelFormSchema = z.object({
     // Require dates OR duration based on mode
     if (data.dateInputMode === 'dates') return !!data.startDate && !!data.endDate;
     if (data.dateInputMode === 'duration') return !!data.durationDays;
-    return false; // Should not happen if mode is set
+    return false; // Should not happen if mode is set and has default
 }, {
-    message: "Please select both start/end dates or specify a duration.",
-    // Apply error to a common path or a specific one based on mode
-    path: ["startDate"], // Apply error to startDate for date mode failure
-})
-.refine(data => {
-    // Ensure duration is set if mode is duration
-    if (data.dateInputMode === 'duration' && !data.durationDays) return false;
-    return true;
-}, {
-    message: "Please specify the trip duration in days.",
-    path: ["durationDays"],
+    // Updated message to be more specific
+    message: "Please select both start/end dates or specify a trip duration.",
+    // Apply error based on the mode that failed
+    path: ["startDate"], // Can apply to either, startDate is fine
 });
+// Removed the second refine for durationDays as the main refine covers it.
 
 
 type TravelFormValues = z.infer<typeof travelFormSchema>;
@@ -155,6 +149,8 @@ export default function MyTravelsPage() {
 
    // Watch the date input mode to conditionally render/disable fields
    const dateInputMode = useWatch({ control: form.control, name: 'dateInputMode' });
+   // Watch form validity
+   const isFormValid = form.formState.isValid;
 
   // --- Effect for Authentication Check ---
    useEffect(() => {
@@ -234,6 +230,7 @@ export default function MyTravelsPage() {
     }
 
     // *** Placeholder: Derive IATA from departureCity ***
+    // In a real app, use a Geocoding API or a lookup service
     const departureIata = travelData.departureCity.substring(0,3).toUpperCase(); // VERY Basic placeholder
      if (departureIata.length !== 3) {
           toast({ variant: 'destructive', title: 'Matching Error', description: 'Could not determine IATA code for departure city.' });
@@ -320,15 +317,7 @@ export default function MyTravelsPage() {
         toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to add a travel plan.' });
         return;
     }
-    // Validation based on dateInputMode
-    if (data.dateInputMode === 'dates' && (!data.startDate || !data.endDate)) {
-         toast({ variant: 'destructive', title: 'Missing Dates', description: 'Please select both a start and end date.' });
-         return;
-    }
-     if (data.dateInputMode === 'duration' && !data.durationDays) {
-         toast({ variant: 'destructive', title: 'Missing Duration', description: 'Please specify the trip duration in days.' });
-         return;
-    }
+    // Validation based on dateInputMode - now handled by Zod refine
 
     setIsSubmitting(true);
     console.log("Submitting Travel Form Data:", data); // Log form data
@@ -1003,12 +992,10 @@ export default function MyTravelsPage() {
                                                                 />
                                                           </div>
                                                           {/* Display top-level form errors related to date/duration refinement */}
-                                                          {form.formState.errors.startDate?.type === 'refine' && (
+                                                           {form.formState.errors.startDate && form.formState.errors.startDate.type === 'refine' && (
                                                             <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.startDate.message}</p>
                                                            )}
-                                                            {form.formState.errors.durationDays?.type === 'refine' && (
-                                                            <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.durationDays.message}</p>
-                                                           )}
+
                                                     </FormItem>
                                                 )}
                                             />
@@ -1066,7 +1053,8 @@ export default function MyTravelsPage() {
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting || isAiLoading || !form.formState.isValid}>
+                        {/* Button disabled state depends on form validity AND loading state */}
+                        <Button type="submit" disabled={isSubmitting || isAiLoading || !isFormValid}>
                         {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
                         </Button>
