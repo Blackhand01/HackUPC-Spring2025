@@ -1,7 +1,7 @@
 // src/app/matches/page.tsx - Refactored for "My Travels / Plan Trip"
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
 import { useForm, SubmitHandler, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send } from 'lucide-react'; // Added Bot, Send
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send } from 'lucide-react'; // Renamed Users icon to UsersIcon to avoid conflict with User type
 import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -25,9 +25,9 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Textarea } from '@/components/ui/textarea'; // Added Textarea
-import { ScrollArea } from '@/components/ui/scroll-area'; // Added ScrollArea
-import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow'; // Import AI flow
+import { Textarea } from '@/components/ui/textarea';
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow';
 
 // Interfaces (consider moving to a shared types file)
 interface Place {
@@ -36,6 +36,7 @@ interface Place {
   country: string;
 }
 
+// Ensure Timestamp properties are correctly typed
 interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
@@ -44,8 +45,9 @@ interface Travel {
   dateRange?: { start: Timestamp; end: Timestamp } | null;
   durationDays?: number;
   places?: Place[];
-  createdAt: Timestamp;
+  createdAt: Timestamp; // Ensure this is always treated as Timestamp
 }
+
 
 interface Group {
   id: string;
@@ -57,14 +59,14 @@ const MOOD_OPTIONS = [
     { value: "relaxed", label: "Relaxed", icon: <Smile className="h-4 w-4" /> },
     { value: "adventurous", label: "Adventurous", icon: <Mountain className="h-4 w-4" /> },
     { value: "cultural", label: "Cultural", icon: <Film className="h-4 w-4" /> },
-    { value: "social", label: "Social", icon: <Users className="h-4 w-4" /> },
+    { value: "social", label: "Social", icon: <UsersIcon className="h-4 w-4" /> },
     { value: "nature", label: "Nature", icon: <Leaf className="h-4 w-4" /> },
 ];
 const ACTIVITY_OPTIONS = [
     { value: "hiking", label: "Hiking", icon: <Mountain className="h-4 w-4" /> },
     { value: "museums", label: "Museums", icon: <Film className="h-4 w-4" /> },
     { value: "beach", label: "Beach", icon: <PlaneTakeoff className="h-4 w-4" /> }, // Replace with better icon if available
-    { value: "nightlife", label: "Nightlife", icon: <Users className="h-4 w-4" /> },
+    { value: "nightlife", label: "Nightlife", icon: <UsersIcon className="h-4 w-4" /> },
     { value: "foodie", label: "Foodie", icon: <Utensils className="h-4 w-4" /> },
     { value: "other", label: "Other...", icon: <Info className="h-4 w-4" /> },
 ];
@@ -159,7 +161,7 @@ export default function MyTravelsPage() {
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [currentUserInput, setCurrentUserInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const chatScrollAreaRef = React.useRef<HTMLDivElement>(null);
+  const chatScrollAreaRef = useRef<HTMLDivElement>(null); // Use React.useRef
 
 
   const form = useForm<TravelFormValues>({
@@ -288,6 +290,7 @@ export default function MyTravelsPage() {
        if (data.tripType === 'individual') {
             setMyIndividualTravels(prev => [...prev, { ...travelToAdd, id: docRef.id, createdAt: travelToAdd.createdAt }]);
        } else {
+           // If group trip, navigate to groups page to see the new trip listed there
            router.push('/groups');
        }
 
@@ -377,7 +380,7 @@ export default function MyTravelsPage() {
 
         try {
             const aiInput: PlanTravelAssistantInput = {
-                currentChat: chatHistory.map(m => ({ role: m.sender, text: m.message })), // Convert history for AI
+                currentChat: chatHistory.map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })), // Ensure correct role mapping
                 userPrompt: userMessage.message,
             };
             const aiOutput: PlanTravelAssistantOutput = await planTravelAssistant(aiInput);
@@ -390,49 +393,54 @@ export default function MyTravelsPage() {
             setChatHistory(prev => [...prev, aiMessage]);
 
             // --- Update Form Values based on AI Output ---
-            // This requires the AI to reliably extract values.
-            // For now, we'll log the extracted values. Actual form update needs careful implementation.
             console.log("AI Extracted Data:", aiOutput.extractedData);
             if (aiOutput.extractedData) {
-                if (aiOutput.extractedData.mood) {
-                    const moodOption = MOOD_OPTIONS.find(opt => opt.value === aiOutput.extractedData?.mood);
+                 const { mood, activity, activityOther, durationDays, startDate, endDate } = aiOutput.extractedData;
+
+                if (mood) {
+                    const moodOption = MOOD_OPTIONS.find(opt => opt.value === mood);
                     if (moodOption) {
                          form.setValue('mood', moodOption.value, { shouldValidate: true });
                          const index = MOOD_OPTIONS.findIndex(opt => opt.value === moodOption.value);
                          setMoodSliderValue(index >= 0 ? index : 0);
                     }
                 }
-                if (aiOutput.extractedData.activity) {
-                    const activityOption = ACTIVITY_OPTIONS.find(opt => opt.value === aiOutput.extractedData?.activity);
+                if (activity) {
+                    const activityOption = ACTIVITY_OPTIONS.find(opt => opt.value === activity);
                      if (activityOption && activityOption.value !== 'other') {
                         form.setValue('activity', activityOption.value, { shouldValidate: true });
                         const index = ACTIVITY_OPTIONS.findIndex(opt => opt.value === activityOption.value);
                         setActivitySliderValue(index >= 0 ? index : 0);
                         form.setValue('activityOther', '', { shouldValidate: true });
-                     } else if (aiOutput.extractedData.activityOther) {
-                         // If AI specifically provides 'other' and details
+                     } else if (activity === 'other' && activityOther) {
+                         // Handle 'other' explicitly provided by AI
                         form.setValue('activity', 'other', { shouldValidate: true });
-                        form.setValue('activityOther', aiOutput.extractedData.activityOther, { shouldValidate: true });
-                         setActivitySliderValue(ACTIVITY_OPTIONS.findIndex(opt => opt.value === 'other'));
+                        form.setValue('activityOther', activityOther, { shouldValidate: true });
+                         const otherIndex = ACTIVITY_OPTIONS.findIndex(opt => opt.value === 'other');
+                         setActivitySliderValue(otherIndex >= 0 ? otherIndex : 0);
                      }
                 }
-                if (aiOutput.extractedData.durationDays) {
-                    form.setValue('durationDays', aiOutput.extractedData.durationDays, { shouldValidate: true });
-                    setDurationSliderValue([aiOutput.extractedData.durationDays]);
+                if (durationDays) {
+                    form.setValue('durationDays', durationDays, { shouldValidate: true });
+                    setDurationSliderValue([durationDays]);
                     form.setValue('startDate', null, { shouldValidate: true });
                     form.setValue('endDate', null, { shouldValidate: true });
-                } else if (aiOutput.extractedData.startDate && aiOutput.extractedData.endDate) {
-                    // Assuming AI provides date strings - need parsing
+                } else if (startDate && endDate) {
                     try {
-                        const startDate = new Date(aiOutput.extractedData.startDate);
-                        const endDate = new Date(aiOutput.extractedData.endDate);
-                        form.setValue('startDate', startDate, { shouldValidate: true });
-                        form.setValue('endDate', endDate, { shouldValidate: true });
-                        form.setValue('durationDays', undefined, { shouldValidate: true });
-                        setDurationSliderValue([1]);
+                        const start = new Date(startDate); // Attempt to parse date string
+                        const end = new Date(endDate);
+                        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) { // Check if dates are valid
+                            form.setValue('startDate', start, { shouldValidate: true });
+                            form.setValue('endDate', end, { shouldValidate: true });
+                            form.setValue('durationDays', undefined, { shouldValidate: true });
+                            setDurationSliderValue([1]);
+                        } else {
+                             console.error("AI returned invalid date format:", startDate, endDate);
+                             toast({ variant: 'destructive', title: "AI Date Error", description: "AI provided invalid dates. Please set manually."});
+                        }
                     } catch (e) {
-                        console.error("AI returned invalid date format:", e);
-                        // Handle error - maybe ask user to confirm dates
+                        console.error("Error parsing AI dates:", e);
+                         toast({ variant: 'destructive', title: "AI Date Error", description: "Could not parse dates from AI. Please set manually."});
                     }
                 }
                  // Optionally, prompt user to confirm/switch to guided mode to finalize
@@ -441,18 +449,19 @@ export default function MyTravelsPage() {
 
         } catch (error) {
             console.error('Error calling AI assistant:', error);
+            const errorMessage = error instanceof Error ? error.message : 'Could not get response from AI assistant.';
             toast({
                 variant: 'destructive',
                 title: 'AI Error',
-                description: 'Could not get response from AI assistant. Please try again.',
+                description: errorMessage + " Please try again.",
             });
-            // Optionally remove the user message or add an error message to chat
-            const errorMessage: ChatMessage = {
+            // Add an error message to chat
+            const errorChatMessage: ChatMessage = {
                  sender: 'ai',
-                 message: "Sorry, I encountered an error. Please try again.",
+                 message: "Sorry, I encountered an error trying to process that. Please try again.",
                  timestamp: Date.now(),
              };
-             setChatHistory(prev => [...prev, errorMessage]);
+             setChatHistory(prev => [...prev, errorChatMessage]);
         } finally {
             setIsAiLoading(false);
         }
@@ -461,9 +470,13 @@ export default function MyTravelsPage() {
     // --- Scroll Chat Area ---
     useEffect(() => {
         if (chatScrollAreaRef.current) {
+            const scrollElement = chatScrollAreaRef.current.querySelector('[data-radix-scroll-area-viewport]');
+            if (scrollElement) {
+                scrollElement.scrollTop = scrollElement.scrollHeight;
+            }
             // Use `scrollIntoView` on a dummy element at the end for better control
-            const endOfChat = chatScrollAreaRef.current.querySelector('#end-of-chat');
-            endOfChat?.scrollIntoView({ behavior: 'smooth' });
+            // const endOfChat = chatScrollAreaRef.current.querySelector('#end-of-chat');
+            // endOfChat?.scrollIntoView({ behavior: 'smooth' });
         }
     }, [chatHistory]); // Trigger scroll on new message
 
@@ -481,7 +494,7 @@ export default function MyTravelsPage() {
                 case 'relaxed': return <Smile className="h-4 w-4 text-primary"/>;
                 case 'adventurous': return <Mountain className="h-4 w-4 text-primary"/>;
                 case 'cultural': return <Film className="h-4 w-4 text-primary"/>;
-                case 'social': return <Users className="h-4 w-4 text-primary"/>;
+                case 'social': return <UsersIcon className="h-4 w-4 text-primary"/>;
                 case 'nature': return <Leaf className="h-4 w-4 text-primary"/>;
                 default: return <Heart className="h-4 w-4 text-primary"/>;
             }
@@ -492,7 +505,7 @@ export default function MyTravelsPage() {
                 case 'hiking': return <Mountain className="h-4 w-4 text-primary"/>;
                 case 'museums': return <Film className="h-4 w-4 text-primary"/>;
                 case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>; // Placeholder
-                case 'nightlife': return <Users className="h-4 w-4 text-primary"/>;
+                case 'nightlife': return <UsersIcon className="h-4 w-4 text-primary"/>;
                 case 'foodie': return <Utensils className="h-4 w-4 text-primary"/>;
                  case 'other': return <Info className="h-4 w-4 text-primary"/>; // Should not happen if startsWith('other:') is checked
                 default: return <Heart className="h-4 w-4 text-primary"/>;
@@ -531,7 +544,7 @@ export default function MyTravelsPage() {
             </DialogHeader>
 
             {/* --- Main Form Content --- */}
-            <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 py-4">
+            <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4"> {/* Removed py-4, added pt-4 */}
 
                  {/* Trip Type Selection */}
                  <div className="space-y-3">
@@ -555,7 +568,7 @@ export default function MyTravelsPage() {
                             </Label>
                             <Label htmlFor="group" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary flex-1 justify-center">
                               <RadioGroupItem value="group" id="group" />
-                               <Users className="h-5 w-5 mr-1" /> Group
+                               <UsersIcon className="h-5 w-5 mr-1" /> Group
                             </Label>
                           </RadioGroup>
                         )}
@@ -836,7 +849,7 @@ export default function MyTravelsPage() {
                                  )}
                                  <div id="end-of-chat"></div> {/* Dummy div for scrolling */}
                              </ScrollArea>
-                             <div className="flex items-center gap-2">
+                             <form onSubmit={handleAiSubmit} className="flex items-center gap-2"> {/* Wrap input/button in form */}
                                  <Textarea
                                      placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week')"
                                      value={currentUserInput}
@@ -846,11 +859,11 @@ export default function MyTravelsPage() {
                                      rows={1}
                                      disabled={isSubmitting || isAiLoading}
                                  />
-                                 <Button type="button" onClick={() => handleAiSubmit()} disabled={isSubmitting || isAiLoading || !currentUserInput.trim()} size="icon">
+                                 <Button type="submit" disabled={isSubmitting || isAiLoading || !currentUserInput.trim()} size="icon"> {/* Changed type to submit */}
                                      <Send className="h-4 w-4"/>
                                      <span className="sr-only">Send message</span>
                                  </Button>
-                             </div>
+                             </form>
                          </div>
                       </TabsContent>
                     </Tabs>
@@ -897,6 +910,19 @@ export default function MyTravelsPage() {
              const activityOther = activityRaw?.startsWith('other:') ? activityRaw.substring(6) : undefined;
              const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
+             // Safely format dates, checking if Timestamp exists and has toDate method
+              const formattedCreatedAt = travel.createdAt && typeof travel.createdAt.toDate === 'function'
+                ? travel.createdAt.toDate().toLocaleDateString()
+                : 'N/A';
+
+             const formattedStartDate = travel.dateRange?.start && typeof travel.dateRange.start.toDate === 'function'
+                ? format(travel.dateRange.start.toDate(), "PPP")
+                : null;
+             const formattedEndDate = travel.dateRange?.end && typeof travel.dateRange.end.toDate === 'function'
+                ? format(travel.dateRange.end.toDate(), "PPP")
+                : null;
+
+
              return (
                 <Card key={travel.id} className="shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col">
                 <CardHeader>
@@ -905,12 +931,12 @@ export default function MyTravelsPage() {
                          <User className="h-5 w-5 text-muted-foreground" title="Individual Trip"/>
                     </CardTitle>
                     <CardDescription>
-                        Created: {travel.createdAt.toDate().toLocaleDateString()}
+                        Created: {formattedCreatedAt}
                     </CardDescription>
-                     {(travel.dateRange) ? (
+                     {(formattedStartDate && formattedEndDate) ? (
                         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
                             <Calendar className="h-4 w-4"/>
-                            {format(travel.dateRange.start.toDate(), "PPP")} - {format(travel.dateRange.end.toDate(), "PPP")}
+                            {formattedStartDate} - {formattedEndDate}
                         </p>
                      ) : travel.durationDays ? (
                          <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
