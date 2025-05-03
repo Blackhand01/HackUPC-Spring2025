@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
-import { Plane, LogOut } from 'lucide-react';
+import { Plane, LogOut, Home } from 'lucide-react'; // Added Home icon
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 
@@ -31,6 +31,13 @@ export function Header() {
               </Link>
                <Link href="/groups">
                  <Button variant="ghost" size="sm" className="px-2 md:px-4">Groups</Button>
+              </Link>
+               <Link href="/properties"> {/* Added Properties Link */}
+                 <Button variant="ghost" size="sm" className="px-2 md:px-4">
+                    <Home className="mr-0 md:mr-2 h-4 w-4" />
+                    <span className="hidden md:inline">My Properties</span>
+                    <span className="md:hidden">Properties</span> {/* Short label for mobile */}
+                 </Button>
               </Link>
               <Button onClick={handleLogout} variant="outline" size="sm" className="px-2 md:px-4">
                 <LogOut className="mr-0 md:mr-2 h-4 w-4" />

@@ -7,7 +7,7 @@ const publicRoutes = ['/login', '/register', '/forgot-password', '/'];
 // Define routes that authenticated users should be redirected away from
 const authRoutes = ['/login', '/register', '/forgot-password'];
 // Define routes that require authentication
-const protectedRoutes = ['/matches', '/groups']; // Add other protected routes here
+const protectedRoutes = ['/matches', '/groups', '/properties']; // Added /properties
 
 export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -17,7 +17,7 @@ export function middleware(request: NextRequest) {
   const isAuthenticated = !!sessionToken; // Basic check, replace with actual validation logic
 
   // Add logging for debugging
-  console.log(`Middleware: Pathname: ${pathname}, sessionToken present: ${!!sessionToken}, isAuthenticated: ${isAuthenticated}`);
+  // console.log(`Middleware: Pathname: ${pathname}, sessionToken present: ${!!sessionToken}, isAuthenticated: ${isAuthenticated}`);
 
 
   const isPublicRoute = publicRoutes.includes(pathname);
@@ -37,7 +37,7 @@ export function middleware(request: NextRequest) {
     console.log(`Unauthenticated user accessing protected route ${pathname}, redirecting to /login`);
     const loginUrl = new URL('/login', request.url);
     // Optionally add a redirect query parameter
-    // loginUrl.searchParams.set('redirect', pathname);
+    loginUrl.searchParams.set('redirectedFrom', pathname); // Add redirect info
     return NextResponse.redirect(loginUrl);
   }
 
