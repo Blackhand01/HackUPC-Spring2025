@@ -16,30 +16,7 @@ import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, PlusCircle, Home, MapPin, ListChecks, CircleHelp, Leaf } from 'lucide-react';
-
-// Define the schema for a single property based on Firestore structure
-interface Property {
-  id?: string; // Firestore document ID
-  hostId: string;
-  title: string;
-  address: {
-    city: string;
-    country: string;
-    coordinates?: { lat: number | null; lng: number | null };
-  };
-  description: string;
-  amenities: string[];
-  rules: string[];
-  greenScore: number;
-  createdAt: Timestamp;
-  updatedAt: Timestamp;
-  images: {
-    imageId: string;
-    description: string;
-    order: number;
-    storagePath: string | null;
-  }[];
-}
+import { type Property } from '@/types'; // Import shared Property type
 
 // Define Zod schema for form validation
 const propertyFormSchema = z.object({
@@ -82,16 +59,10 @@ export default function PropertiesPage() {
 
   // Effect for Authentication Check
   useEffect(() => {
-    // Wait until auth loading is complete before checking authentication
     if (!authLoading) {
         if (!isAuthenticated) {
-            // console.log("PropertiesPage: User not authenticated, redirecting to /login");
             router.push('/login');
-        } else {
-            // console.log("PropertiesPage: User is authenticated.");
         }
-    } else {
-        // console.log("PropertiesPage: Auth state still loading...");
     }
   }, [authLoading, isAuthenticated, router]);
 
@@ -100,7 +71,6 @@ export default function PropertiesPage() {
   useEffect(() => {
     const fetchProperties = async () => {
       if (user?.uid) {
-        // console.log(`PropertiesPage: Fetching properties for user ${user.uid}`);
         setLoadingProperties(true);
         try {
           const propertiesCollection = collection(db, 'properties');
@@ -110,7 +80,6 @@ export default function PropertiesPage() {
             id: doc.id,
             ...doc.data(),
           })) as Property[];
-          // console.log(`PropertiesPage: Fetched ${propertiesList.length} properties.`);
           setProperties(propertiesList);
         } catch (error) {
           console.error('Error fetching properties:', error);
@@ -123,20 +92,16 @@ export default function PropertiesPage() {
           setLoadingProperties(false);
         }
       } else if (!authLoading) {
-        // If auth is done loading and there's no user, stop loading properties
-        // console.log("PropertiesPage: No user ID found after auth load, skipping property fetch.");
         setLoadingProperties(false);
       }
     };
 
-    // Only fetch if authenticated and auth loading is complete
     if (!authLoading && isAuthenticated && user) {
       fetchProperties();
     } else if (!authLoading && !isAuthenticated) {
-        // If not authenticated after loading, ensure loading state is false
         setLoadingProperties(false);
     }
-  }, [user, isAuthenticated, authLoading, toast]); // Dependencies updated
+  }, [user, isAuthenticated, authLoading, toast]);
 
   const onSubmit: SubmitHandler<PropertyFormValues> = async (data) => {
     if (!user) {
@@ -144,7 +109,6 @@ export default function PropertiesPage() {
         return;
     }
     setIsSubmitting(true);
-    // console.log("PropertiesPage: Submitting new property data:", data);
 
     try {
       const propertyToAdd: Omit<Property, 'id'> = {
@@ -164,21 +128,19 @@ export default function PropertiesPage() {
         greenScore: data.greenScore || 0,
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(),
-        images: [], // Start with empty images array
+        images: [],
       };
 
       const docRef = await addDoc(collection(db, 'properties'), propertyToAdd);
-      // console.log("PropertiesPage: Property added with ID:", docRef.id);
       toast({
         title: 'Property Added!',
         description: `Your property "${data.title}" has been successfully added.`,
       });
 
-      // Add the new property to the local state immediately for better UX
       setProperties(prev => [...prev, { ...propertyToAdd, id: docRef.id, createdAt: propertyToAdd.createdAt, updatedAt: propertyToAdd.updatedAt }]);
 
-      form.reset(); // Reset the form
-      setIsAddDialogOpen(false); // Close the dialog
+      form.reset();
+      setIsAddDialogOpen(false);
 
     } catch (error) {
       console.error('Error adding property:', error);
@@ -192,9 +154,7 @@ export default function PropertiesPage() {
     }
   };
 
-  // Centralized Loading/Redirect Logic
   if (authLoading) {
-    // console.log("PropertiesPage: Showing loading spinner (authLoading)");
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -202,11 +162,7 @@ export default function PropertiesPage() {
     );
   }
 
-  // If loading is complete but user is not authenticated, the useEffect hook will handle the redirect.
-  // We can optionally show a "Redirecting..." message or the spinner again briefly.
   if (!isAuthenticated) {
-    // console.log("PropertiesPage: Showing loading spinner (redirecting)");
-     // Or return null, or a "Redirecting..." message
      return (
         <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
             <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -215,8 +171,6 @@ export default function PropertiesPage() {
     );
   }
 
-  // If authenticated, render the page content
-  // console.log("PropertiesPage: Rendering page content for authenticated user.");
   return (
     <div className="container mx-auto py-12 px-4">
       <div className="flex justify-between items-center mb-8">
@@ -353,7 +307,7 @@ export default function PropertiesPage() {
             <CardDescription>Add your first property to start swapping!</CardDescription>
           </CardHeader>
           <CardContent>
-             <Button onClick={() => setIsAddDialogOpen(true)}> {/* Changed DialogTrigger to simple Button */}
+             <Button onClick={() => setIsAddDialogOpen(true)}>
                <PlusCircle className="mr-2 h-4 w-4" /> Add Your First Property
              </Button>
           </CardContent>
@@ -380,17 +334,15 @@ export default function PropertiesPage() {
                   <div className="mt-3">
                     <h4 className="text-xs font-semibold uppercase text-muted-foreground mb-1">Amenities</h4>
                     <div className="flex flex-wrap gap-1">
-                      {property.amenities.slice(0, 4).map((amenity, index) => ( // Show max 4 amenities
+                      {property.amenities.slice(0, 4).map((amenity, index) => (
                         <span key={index} className="text-xs bg-secondary text-secondary-foreground px-2 py-0.5 rounded-full">{amenity}</span>
                       ))}
                        {property.amenities.length > 4 && <span className="text-xs text-muted-foreground">...</span>}
                     </div>
                   </div>
                 )}
-                 {/* Optionally display rules or other details */}
               </CardContent>
                <CardFooter className="flex justify-end pt-4">
-                  {/* Add Edit/Delete buttons later */}
                   <Button variant="outline" size="sm">View Details</Button>
                </CardFooter>
             </Card>

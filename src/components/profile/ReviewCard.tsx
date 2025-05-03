@@ -1,8 +1,7 @@
-
 // src/components/profile/ReviewCard.tsx
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Star, Leaf, User, Calendar } from "lucide-react";
-import { type Review } from "@/app/profile/page"; // Adjust path if Review type is moved
+import { type Review } from "@/types"; // Import shared Review type
 import { format } from 'date-fns';
 
 interface ReviewCardProps {

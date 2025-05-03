@@ -1,12 +1,11 @@
-
 // src/app/matches/page.tsx - Refactored for "My Travels / Plan Trip"
 'use client';
 
-import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
-import { useForm, SubmitHandler, Controller, ControllerRenderProps } from 'react-hook-form'; // Added ControllerRenderProps
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { useForm, SubmitHandler, Controller, ControllerRenderProps } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
-import { collection, query, where, getDocs, addDoc, Timestamp, doc, getDoc } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, Timestamp, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore'; // Added updateDoc, setDoc
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
@@ -15,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed } from 'lucide-react'; // Added LocateFixed icon
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle } from 'lucide-react'; // Added new icons
 import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -29,7 +28,8 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow';
-import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form'; // Import form components
+import { findDestinationMatches, type FindDestinationMatchesInput, type FindDestinationMatchesOutput, type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow'; // Import destination matching flow
+import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 
 // Interfaces (consider moving to a shared types file)
 interface Place {
@@ -38,19 +38,23 @@ interface Place {
   country: string;
 }
 
-// Ensure Timestamp properties are correctly typed
 interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
-  departureCity: string; // Added departure city
+  departureCity: string;
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
   dateRange?: { start: Timestamp; end: Timestamp } | null;
   durationDays?: number;
-  places?: Place[];
-  createdAt: Timestamp; // Ensure this is always treated as Timestamp
+  places?: Place[]; // Candidate or selected places
+  createdAt: Timestamp;
+  updatedAt?: Timestamp; // Add updatedAt timestamp
+  // --- Added fields for destination matching ---
+  destinationMatches?: EnrichedDestination[]; // Store ranked results
+  destinationMatchesStatus?: 'pending' | 'processing' | 'completed' | 'error';
+  destinationMatchesError?: string;
+  lastMatchedAt?: Timestamp;
 }
-
 
 interface Group {
   id: string;
@@ -75,43 +79,36 @@ const ACTIVITY_OPTIONS = [
 ];
 const MAX_DURATION_DAYS = 30;
 
+// Example candidate destinations (replace with dynamic logic later if needed)
+const CANDIDATE_DESTINATIONS_EUROPE = ["BCN", "LIS", "DBV", "RAK", "VLC", "ATH", "NAP", "FCO", "PMI", "AGP"];
+
 
 // Define Zod schema for the new travel form validation
 const travelFormSchema = z.object({
   tripType: z.enum(['individual', 'group'], { required_error: "Please select a trip type."}),
   groupId: z.string().optional(), // Required if tripType is 'group'
-  departureCity: z.string().min(2, "Departure city is required."), // Added departure city validation
+  departureCity: z.string().min(2, "Departure city is required."),
+  departureCityIata: z.string().min(3).max(3).optional().describe("IATA code needed for matching."), // Hidden field, potentially derived
   // Mode 1: Guided Sliders
-  mood: z.string().optional(), // Optional now, validation inside refine if mode is guided
-  activity: z.string().optional(), // Optional now
+  mood: z.string().optional(),
+  activity: z.string().optional(),
   activityOther: z.string().optional(),
   durationDays: z.number().min(1, "Duration must be at least 1 day.").max(MAX_DURATION_DAYS).optional(),
   // OR Date Range
   startDate: z.date().optional().nullable(),
   endDate: z.date().optional().nullable(),
   // Mode 2: AI
-  aiPrompt: z.string().optional(), // User's input to AI
-  planningMode: z.enum(['guided', 'ai']).default('guided'), // Track which mode is active
+  aiPrompt: z.string().optional(),
+  planningMode: z.enum(['guided', 'ai']).default('guided'),
 }).refine(data => {
-    // If trip type is group, groupId must be selected
-    if (data.tripType === 'group') {
-        return !!data.groupId;
-    }
+    if (data.tripType === 'group') return !!data.groupId;
     return true;
-}, {
-    message: "Please select a group for a group trip.",
-    path: ["groupId"],
-}).refine(data => {
-    // If activity is 'other', activityOther must be provided
-    if (data.activity === 'other') {
-        return !!data.activityOther && data.activityOther.trim().length > 0;
-    }
+}, { message: "Please select a group for a group trip.", path: ["groupId"]})
+.refine(data => {
+    if (data.activity === 'other') return !!data.activityOther && data.activityOther.trim().length > 0;
     return true;
-}, {
-    message: "Please specify the 'other' activity.",
-    path: ["activityOther"],
-}).refine(data => {
-    // If mode is 'guided', require at least one planning input (Mood/Activity/Duration/Dates)
+}, { message: "Please specify the 'other' activity.", path: ["activityOther"]})
+.refine(data => {
     if (data.planningMode === 'guided') {
         const hasMood = !!data.mood;
         const hasActivity = !!data.activity;
@@ -119,21 +116,16 @@ const travelFormSchema = z.object({
         const hasDateRange = data.startDate !== undefined && data.startDate !== null && data.endDate !== undefined && data.endDate !== null;
         return hasMood || hasActivity || hasDurationDays || hasDateRange;
     }
-    // If mode is 'ai', this check is less strict initially, rely on AI interaction
     return true;
-}, {
-    message: "Please provide at least one preference (Mood, Activity, Duration/Dates) in Guided mode.",
-    path: ["mood"], // Assign error to a relevant field for display
-}).refine(data => {
-    // Ensure end date is after start date if both are provided
-    if (data.startDate && data.endDate) {
-        return data.endDate >= data.startDate;
-    }
+}, { message: "Please provide at least one preference (Mood, Activity, Duration/Dates) in Guided mode.", path: ["mood"]})
+.refine(data => {
+    if (data.startDate && data.endDate) return data.endDate >= data.startDate;
     return true;
-}, {
-    message: "End date must be on or after the start date.",
-    path: ["endDate"],
-});
+}, { message: "End date must be on or after the start date.", path: ["endDate"]})
+.refine(data => {
+    // Require date range for destination matching
+    return !!data.startDate && !!data.endDate;
+}, { message: "Please select both a start and end date for destination matching.", path: ["startDate"] });
 
 
 type TravelFormValues = z.infer<typeof travelFormSchema>;
@@ -150,32 +142,33 @@ export default function MyTravelsPage() {
   const router = useRouter();
   const { toast } = useToast();
   const [myIndividualTravels, setMyIndividualTravels] = useState<Travel[]>([]);
-  const [myGroups, setMyGroups] = useState<Group[]>([]); // For group selection
+  const [myGroups, setMyGroups] = useState<Group[]>([]);
   const [loadingTravels, setLoadingTravels] = useState(true);
-  const [loadingGroups, setLoadingGroups] = useState(false); // Separate loading for groups in dialog
+  const [loadingGroups, setLoadingGroups] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [processingMatchId, setProcessingMatchId] = useState<string | null>(null); // Track which travel ID is being matched
 
   // State for Mode 1 (Sliders)
   const [moodSliderValue, setMoodSliderValue] = useState(0);
   const [activitySliderValue, setActivitySliderValue] = useState(0);
-  const [durationSliderValue, setDurationSliderValue] = useState([5]); // Default 5 days
+  const [durationSliderValue, setDurationSliderValue] = useState([5]);
 
   // State for Mode 2 (AI Chat)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
   const [currentUserInput, setCurrentUserInput] = useState('');
   const [isAiLoading, setIsAiLoading] = useState(false);
-  const chatScrollAreaRef = useRef<HTMLDivElement>(null); // Use React.useRef
-
+  const chatScrollAreaRef = useRef<HTMLDivElement>(null);
 
   const form = useForm<TravelFormValues>({
     resolver: zodResolver(travelFormSchema),
     defaultValues: {
-      tripType: 'individual', // Default to individual
+      tripType: 'individual',
       groupId: undefined,
-      departureCity: '', // Default empty departure city
-      mood: MOOD_OPTIONS[0].value, // Default mood
-      activity: ACTIVITY_OPTIONS[0].value, // Default activity
+      departureCity: '',
+      departureCityIata: '', // Initialize hidden field
+      mood: MOOD_OPTIONS[0].value,
+      activity: ACTIVITY_OPTIONS[0].value,
       activityOther: '',
       durationDays: 5,
       startDate: null,
@@ -199,7 +192,6 @@ export default function MyTravelsPage() {
         setLoadingTravels(true);
         try {
           const travelsCollection = collection(db, 'travels');
-          // Query for travels where userId matches AND groupId is null
           const q = query(travelsCollection, where('userId', '==', user.uid), where('groupId', '==', null));
           const querySnapshot = await getDocs(q);
           const travelsList = querySnapshot.docs.map(doc => ({
@@ -223,7 +215,7 @@ export default function MyTravelsPage() {
    }, [user, authLoading, toast]);
 
 
-  // --- Fetch User's Groups (for selection in the dialog) ---
+  // --- Fetch User's Groups ---
   const fetchMyGroups = useCallback(async () => {
       if (user?.uid) {
           setLoadingGroups(true);
@@ -233,12 +225,11 @@ export default function MyTravelsPage() {
               const querySnapshot = await getDocs(q);
               const groupsList = querySnapshot.docs.map(doc => ({
                   id: doc.id,
-                  groupName: doc.data().groupName || `Group ${doc.id.substring(0,5)}`, // Fallback name
+                  groupName: doc.data().groupName || `Group ${doc.id.substring(0,5)}`,
               })) as Group[];
               setMyGroups(groupsList);
           } catch (error) {
               console.error('Error fetching groups for selection:', error);
-              // Don't toast here, it might be annoying in the dialog
           } finally {
               setLoadingGroups(false);
           }
@@ -249,9 +240,99 @@ export default function MyTravelsPage() {
   useEffect(() => {
     if (!authLoading && isAuthenticated && user) {
       fetchMyIndividualTravels();
-      fetchMyGroups(); // Fetch groups when user is loaded
+      fetchMyGroups();
     }
   }, [user, isAuthenticated, authLoading, fetchMyIndividualTravels, fetchMyGroups]);
+
+
+  // --- Function to Trigger Destination Matching ---
+  const triggerDestinationMatching = useCallback(async (travelData: Travel) => {
+    if (!travelData.id || !travelData.dateRange?.start || !travelData.dateRange?.end || !travelData.departureCity) { // Ensure required fields are present
+      toast({ variant: 'destructive', title: 'Matching Error', description: 'Missing required trip details (dates, departure city) to find matches.' });
+      return;
+    }
+
+    // *** Placeholder: Derive IATA from departureCity ***
+    // In a real app, use a geocoding service or airport lookup API
+    // For now, using a hardcoded example or assuming city IS IATA (use with caution!)
+    const departureIata = travelData.departureCity.substring(0,3).toUpperCase(); // VERY Basic placeholder
+     if (departureIata.length !== 3) {
+          toast({ variant: 'destructive', title: 'Matching Error', description: 'Could not determine IATA code for departure city.' });
+          return;
+     }
+    console.log(`Derived IATA for ${travelData.departureCity}: ${departureIata}`);
+    // *** End Placeholder ***
+
+
+    setProcessingMatchId(travelData.id); // Set loading state for this specific travel item
+
+    // Update Firestore status to 'processing'
+    const travelRef = doc(db, 'travels', travelData.id);
+    try {
+      await updateDoc(travelRef, {
+        destinationMatchesStatus: 'processing',
+        lastMatchedAt: Timestamp.now(),
+      });
+      // Optionally update local state immediately for better UX
+       setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatchesStatus: 'processing' } : t));
+    } catch (error) {
+       console.error("Error updating travel status to processing:", error);
+       toast({ variant: 'destructive', title: 'Matching Error', description: 'Failed to start the matching process.' });
+       setProcessingMatchId(null);
+       return;
+    }
+
+
+    try {
+      const moodPrefs = travelData.preferences.filter(p => p.startsWith('mood:')).map(p => p.substring(5));
+      const activityPrefs = travelData.preferences.filter(p => p.startsWith('activity:')).map(p => p.substring(9)); // Adjusted index
+
+      const matchInput: FindDestinationMatchesInput = {
+        durationDays: travelData.durationDays,
+        moodPreferences: moodPrefs,
+        activityPreferences: activityPrefs,
+        departureCityIata: departureIata, // Use derived IATA
+        preferredStartDate: format(travelData.dateRange.start.toDate(), 'yyyy-MM-dd'),
+        preferredEndDate: format(travelData.dateRange.end.toDate(), 'yyyy-MM-dd'),
+        candidateDestinationIatas: CANDIDATE_DESTINATIONS_EUROPE, // Use predefined candidates
+      };
+
+      console.log("Calling findDestinationMatches with input:", matchInput);
+      const matchOutput: FindDestinationMatchesOutput = await findDestinationMatches(matchInput);
+      console.log("Received findDestinationMatches output:", matchOutput);
+
+      // Update Firestore with results and status 'completed'
+      await updateDoc(travelRef, {
+        destinationMatches: matchOutput.rankedDestinations,
+        destinationMatchesStatus: 'completed',
+        lastMatchedAt: Timestamp.now(),
+        destinationMatchesError: null, // Clear previous error
+      });
+       // Update local state
+       setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatches: matchOutput.rankedDestinations, destinationMatchesStatus: 'completed', destinationMatchesError: undefined, lastMatchedAt: Timestamp.now() } : t));
+
+      toast({ title: 'Matching Complete!', description: `Found potential destinations for trip #${travelData.id?.substring(0, 6)}.` });
+
+    } catch (error: any) {
+      console.error(`Error during destination matching for travel ${travelData.id}:`, error);
+      const errorMessage = error.message || "An unknown error occurred during matching.";
+       // Update Firestore with status 'error'
+        try {
+             await updateDoc(travelRef, {
+                destinationMatchesStatus: 'error',
+                destinationMatchesError: errorMessage,
+                lastMatchedAt: Timestamp.now(),
+             });
+              // Update local state
+             setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatchesStatus: 'error', destinationMatchesError: errorMessage, lastMatchedAt: Timestamp.now() } : t));
+        } catch (updateError) {
+             console.error("Failed to update travel status to error:", updateError);
+        }
+      toast({ variant: 'destructive', title: 'Matching Failed', description: errorMessage });
+    } finally {
+      setProcessingMatchId(null); // Clear loading state for this item
+    }
+  }, [toast]); // Include dependencies
 
 
   // --- Form Submission ---
@@ -260,9 +341,12 @@ export default function MyTravelsPage() {
         toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to add a travel plan.' });
         return;
     }
+    if (!data.startDate || !data.endDate) {
+         toast({ variant: 'destructive', title: 'Missing Dates', description: 'Please select both a start and end date.' });
+         return;
+    }
     setIsSubmitting(true);
 
-    // Construct preferences array based on final form state (could be from guided or AI)
     const preferences: string[] = [];
     if (data.mood) preferences.push(`mood:${data.mood}`);
     if (data.activity === 'other' && data.activityOther) {
@@ -270,35 +354,43 @@ export default function MyTravelsPage() {
     } else if (data.activity) {
         preferences.push(`activity:${data.activity}`);
     }
-    // Add more preferences if AI generated them
+
+    let newTravelDocId: string | null = null; // To store the ID of the newly created doc
 
     try {
        const travelToAdd: Omit<Travel, 'id'> = {
         userId: data.tripType === 'individual' ? user.uid : null,
         groupId: data.tripType === 'group' ? data.groupId! : null,
-        departureCity: data.departureCity, // Add departure city
+        departureCity: data.departureCity,
         preferences: preferences,
         dateRange: data.startDate && data.endDate ? {
             start: Timestamp.fromDate(data.startDate),
             end: Timestamp.fromDate(data.endDate)
         } : null,
         durationDays: (data.startDate && data.endDate) ? undefined : data.durationDays,
-        places: [], // AI could potentially populate this in future
+        places: [],
         createdAt: Timestamp.now(),
+        updatedAt: Timestamp.now(),
+        destinationMatchesStatus: 'pending', // Initial status
       };
 
       const docRef = await addDoc(collection(db, 'travels'), travelToAdd);
+      newTravelDocId = docRef.id; // Store the new ID
+
       toast({
         title: 'Travel Plan Added!',
-        description: `Your new ${data.tripType} travel plan has been saved.`,
+        description: `Your new ${data.tripType} travel plan has been saved. Finding matches...`,
       });
 
+        const newTravelData = { ...travelToAdd, id: newTravelDocId, createdAt: travelToAdd.createdAt, updatedAt: travelToAdd.updatedAt };
+
+
        if (data.tripType === 'individual') {
-            setMyIndividualTravels(prev => [...prev, { ...travelToAdd, id: docRef.id, createdAt: travelToAdd.createdAt }]);
+            setMyIndividualTravels(prev => [...prev, newTravelData]);
+             // Trigger matching immediately after creation for individual trips
+            triggerDestinationMatching(newTravelData);
        } else {
-           // If group trip, navigate to groups page to see the new trip listed there
-           // Consider refreshing the groups page data if staying on the same page
-           // For now, let's assume navigating to groups page implies a fresh load there.
+           // Group trips are handled on the groups page, no immediate matching here.
            router.push('/groups');
        }
 
@@ -306,7 +398,8 @@ export default function MyTravelsPage() {
       form.reset({
           tripType: 'individual',
           groupId: undefined,
-          departureCity: '', // Reset departure city
+          departureCity: '',
+          departureCityIata: '',
           mood: MOOD_OPTIONS[0].value,
           activity: ACTIVITY_OPTIONS[0].value,
           activityOther: '',
@@ -319,7 +412,7 @@ export default function MyTravelsPage() {
       setMoodSliderValue(0);
       setActivitySliderValue(0);
       setDurationSliderValue([5]);
-      setChatHistory([]); // Reset chat
+      setChatHistory([]);
       setCurrentUserInput('');
       setIsAddDialogOpen(false);
 
@@ -330,8 +423,14 @@ export default function MyTravelsPage() {
         title: 'Error Adding Travel',
         description: 'Failed to save your travel plan. Please try again.',
       });
+       // If creation failed, potentially clean up if status was set? (Less likely needed)
+        if (newTravelDocId) {
+             // Optional: delete the partially created document if desired
+             // await deleteDoc(doc(db, 'travels', newTravelDocId));
+        }
     } finally {
       setIsSubmitting(false);
+      // Do not reset processingMatchId here, let the matching process handle it
     }
   };
 
@@ -390,7 +489,7 @@ export default function MyTravelsPage() {
 
         try {
             const aiInput: PlanTravelAssistantInput = {
-                currentChat: chatHistory.map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })), // Ensure correct role mapping
+                currentChat: chatHistory.map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })),
                 userPrompt: userMessage.message,
             };
             const aiOutput: PlanTravelAssistantOutput = await planTravelAssistant(aiInput);
@@ -406,7 +505,6 @@ export default function MyTravelsPage() {
             console.log("AI Extracted Data:", aiOutput.extractedData);
             if (aiOutput.extractedData) {
                  const { mood, activity, activityOther, durationDays, startDate, endDate } = aiOutput.extractedData;
-                 // TODO: Add departureCity extraction if needed in AI flow
 
                 if (mood) {
                     const moodOption = MOOD_OPTIONS.find(opt => opt.value === mood);
@@ -424,7 +522,6 @@ export default function MyTravelsPage() {
                         setActivitySliderValue(index >= 0 ? index : 0);
                         form.setValue('activityOther', '', { shouldValidate: true });
                      } else if (activity === 'other' && activityOther) {
-                         // Handle 'other' explicitly provided by AI
                         form.setValue('activity', 'other', { shouldValidate: true });
                         form.setValue('activityOther', activityOther, { shouldValidate: true });
                          const otherIndex = ACTIVITY_OPTIONS.findIndex(opt => opt.value === 'other');
@@ -438,9 +535,9 @@ export default function MyTravelsPage() {
                     form.setValue('endDate', null, { shouldValidate: true });
                 } else if (startDate && endDate) {
                     try {
-                        const start = new Date(startDate); // Attempt to parse date string
+                        const start = new Date(startDate);
                         const end = new Date(endDate);
-                        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) { // Check if dates are valid
+                        if (!isNaN(start.getTime()) && !isNaN(end.getTime())) {
                             form.setValue('startDate', start, { shouldValidate: true });
                             form.setValue('endDate', end, { shouldValidate: true });
                             form.setValue('durationDays', undefined, { shouldValidate: true });
@@ -454,7 +551,6 @@ export default function MyTravelsPage() {
                          toast({ variant: 'destructive', title: "AI Date Error", description: "Could not parse dates from AI. Please set manually."});
                     }
                 }
-                 // Optionally, prompt user to confirm/switch to guided mode to finalize
                  toast({ title: "AI Update", description: "Preferences updated based on chat. Review and save."});
             }
 
@@ -466,7 +562,6 @@ export default function MyTravelsPage() {
                 title: 'AI Error',
                 description: errorMessage + " Please try again.",
             });
-            // Add an error message to chat
             const errorChatMessage: ChatMessage = {
                  sender: 'ai',
                  message: "Sorry, I encountered an error trying to process that. Please try again.",
@@ -485,11 +580,8 @@ export default function MyTravelsPage() {
             if (scrollElement) {
                 scrollElement.scrollTop = scrollElement.scrollHeight;
             }
-            // Use `scrollIntoView` on a dummy element at the end for better control
-            // const endOfChat = chatScrollAreaRef.current.querySelector('#end-of-chat');
-            // endOfChat?.scrollIntoView({ behavior: 'smooth' });
         }
-    }, [chatHistory]); // Trigger scroll on new message
+    }, [chatHistory]);
 
 
      // --- Helper to parse preferences --- (Duplicate from groups, consider moving to utils)
@@ -518,7 +610,7 @@ export default function MyTravelsPage() {
                 case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>; // Placeholder
                 case 'nightlife': return <UsersIcon className="h-4 w-4 text-primary"/>;
                 case 'foodie': return <Utensils className="h-4 w-4 text-primary"/>;
-                 case 'other': return <Info className="h-4 w-4 text-primary"/>; // Should not happen if startsWith('other:') is checked
+                 case 'other': return <Info className="h-4 w-4 text-primary"/>;
                 default: return <Heart className="h-4 w-4 text-primary"/>;
             }
         }
@@ -550,11 +642,10 @@ export default function MyTravelsPage() {
             <DialogHeader>
               <DialogTitle className="text-2xl">Plan Your Next Adventure</DialogTitle>
               <DialogDescription>
-                Tell us about your dream trip. Is it solo or with a group?
+                Tell us about your dream trip. Is it solo or with a group? Select dates to enable matching.
               </DialogDescription>
             </DialogHeader>
 
-            {/* --- Wrap with Form Provider --- */}
              <Form {...form}>
                 <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4">
 
@@ -640,7 +731,6 @@ export default function MyTravelsPage() {
                         />
                     )}
 
-                    {/* Departure City */}
                      <FormField
                         control={form.control}
                         name="departureCity"
@@ -655,8 +745,6 @@ export default function MyTravelsPage() {
                         )}
                      />
 
-
-                    {/* Emotional Planning Section (Tabs) */}
                     <FormField
                         control={form.control}
                         name="planningMode"
@@ -670,13 +758,11 @@ export default function MyTravelsPage() {
                                             <TabsTrigger value="ai"><Wand2 className="mr-2 h-4 w-4"/>AI Assistant</TabsTrigger>
                                          </TabsList>
 
-                                         {/* --- Mode 1: Guided Planning --- */}
                                          <TabsContent value="guided" className="mt-6 space-y-6">
-                                             {/* Mood Slider */}
                                              <FormField
                                                 control={form.control}
                                                 name="mood"
-                                                render={({ field: moodField }) => ( // Renamed field to avoid conflict
+                                                render={({ field: moodField }) => (
                                                     <FormItem>
                                                         <FormLabel className="flex items-center gap-1 text-base font-semibold"><Smile className="h-5 w-5"/>Mood</FormLabel>
                                                         <FormControl>
@@ -707,11 +793,10 @@ export default function MyTravelsPage() {
                                                 )}
                                             />
 
-                                             {/* Activity Slider */}
                                             <FormField
                                                 control={form.control}
                                                 name="activity"
-                                                render={({ field: activityField }) => ( // Renamed field
+                                                render={({ field: activityField }) => (
                                                      <FormItem>
                                                         <FormLabel className="flex items-center gap-1 text-base font-semibold"><Mountain className="h-5 w-5"/>Activity</FormLabel>
                                                          <FormControl>
@@ -741,7 +826,7 @@ export default function MyTravelsPage() {
                                                              <FormField
                                                                 control={form.control}
                                                                 name="activityOther"
-                                                                render={({ field: otherField }) => ( // Renamed field
+                                                                render={({ field: otherField }) => (
                                                                     <FormItem className="px-4 space-y-1 pt-2">
                                                                          <FormLabel>Describe "Other" Activity</FormLabel>
                                                                          <FormControl>
@@ -761,14 +846,13 @@ export default function MyTravelsPage() {
                                                 )}
                                             />
 
-                                              {/* Duration Slider OR Date Range Picker */}
                                             <FormItem>
                                                 <FormLabel className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Duration / Dates</FormLabel>
                                                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
                                                      <FormField
                                                         control={form.control}
                                                         name="startDate"
-                                                        render={({ field: startDateField }) => ( // Renamed field
+                                                        render={({ field: startDateField }) => (
                                                             <FormItem className="flex flex-col space-y-2">
                                                                 <FormLabel>Start Date</FormLabel>
                                                                 <Popover>
@@ -791,7 +875,7 @@ export default function MyTravelsPage() {
                                                                          <ShadCalendar
                                                                             mode="single"
                                                                             selected={startDateField.value ?? undefined}
-                                                                            onSelect={(date) => handleDateChange(date, startDateField)} // Pass field object
+                                                                            onSelect={(date) => handleDateChange(date, startDateField)}
                                                                             initialFocus
                                                                         />
                                                                     </PopoverContent>
@@ -803,7 +887,7 @@ export default function MyTravelsPage() {
                                                      <FormField
                                                         control={form.control}
                                                         name="endDate"
-                                                        render={({ field: endDateField }) => ( // Renamed field
+                                                        render={({ field: endDateField }) => (
                                                             <FormItem className="flex flex-col space-y-2">
                                                                 <FormLabel>End Date</FormLabel>
                                                                 <Popover>
@@ -826,7 +910,7 @@ export default function MyTravelsPage() {
                                                                          <ShadCalendar
                                                                             mode="single"
                                                                             selected={endDateField.value ?? undefined}
-                                                                            onSelect={(date) => handleDateChange(date, endDateField)} // Pass field object
+                                                                            onSelect={(date) => handleDateChange(date, endDateField)}
                                                                             disabled={(date) =>
                                                                                 form.watch('startDate') ? date < form.watch('startDate')! : false
                                                                             }
@@ -842,7 +926,7 @@ export default function MyTravelsPage() {
                                                  <FormField
                                                     control={form.control}
                                                     name="durationDays"
-                                                    render={({ field: durationField }) => ( // Renamed field
+                                                    render={({ field: durationField }) => (
                                                          <FormItem className="pt-4 space-y-3">
                                                              <FormLabel className="text-center block text-sm text-muted-foreground">Or select approximate duration</FormLabel>
                                                              <FormControl>
@@ -868,15 +952,13 @@ export default function MyTravelsPage() {
                                             </FormItem>
 
 
-                                             {/* General Error Message for missing fields in guided mode */}
                                              {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
                                                 <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
                                              )}
                                          </TabsContent>
 
-                                         {/* --- Mode 2: AI Assistant --- */}
                                         <TabsContent value="ai">
-                                            <div className="flex flex-col h-[50vh]"> {/* Set fixed height */}
+                                            <div className="flex flex-col h-[50vh]">
                                                  <Label className="text-base font-semibold mb-2 flex items-center gap-1"><Bot className="h-5 w-5"/>AI Travel Assistant</Label>
                                                 <ScrollArea className="flex-grow border rounded-md p-4 mb-4 bg-muted/50" ref={chatScrollAreaRef}>
                                                     {chatHistory.length === 0 && (
@@ -899,9 +981,8 @@ export default function MyTravelsPage() {
                                                             </div>
                                                         </div>
                                                     )}
-                                                    <div id="end-of-chat"></div> {/* Dummy div for scrolling */}
+                                                    <div id="end-of-chat"></div>
                                                 </ScrollArea>
-                                                {/* AI Input - no need for FormField as it's handled separately */}
                                                  <div className="flex items-center gap-2">
                                                      <Textarea
                                                          placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week from Rome')"
@@ -912,7 +993,7 @@ export default function MyTravelsPage() {
                                                          rows={1}
                                                          disabled={isSubmitting || isAiLoading}
                                                      />
-                                                     <Button type="button" onClick={() => handleAiSubmit()} disabled={isSubmitting || isAiLoading || !currentUserInput.trim()} size="icon"> {/* Changed type to button and onClick */}
+                                                     <Button type="button" onClick={() => handleAiSubmit()} disabled={isSubmitting || isAiLoading || !currentUserInput.trim()} size="icon">
                                                          <Send className="h-4 w-4"/>
                                                          <span className="sr-only">Send message</span>
                                                      </Button>
@@ -921,7 +1002,7 @@ export default function MyTravelsPage() {
                                         </TabsContent>
                                     </Tabs>
                                 </FormControl>
-                                <FormMessage /> {/* For planningMode validation errors */}
+                                <FormMessage />
                             </FormItem>
                         )}
                     />
@@ -966,7 +1047,6 @@ export default function MyTravelsPage() {
              const activityOther = activityRaw?.startsWith('other:') ? activityRaw.substring(6) : undefined;
              const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
-             // Safely format dates, checking if Timestamp exists and has toDate method
               const formattedCreatedAt = travel.createdAt && typeof travel.createdAt.toDate === 'function'
                 ? travel.createdAt.toDate().toLocaleDateString()
                 : 'N/A';
@@ -977,6 +1057,10 @@ export default function MyTravelsPage() {
              const formattedEndDate = travel.dateRange?.end && typeof travel.dateRange.end.toDate === 'function'
                 ? format(travel.dateRange.end.toDate(), "PPP")
                 : null;
+
+             const isMatching = processingMatchId === travel.id || travel.destinationMatchesStatus === 'processing';
+             const matchCompleted = travel.destinationMatchesStatus === 'completed';
+             const matchError = travel.destinationMatchesStatus === 'error';
 
 
              return (
@@ -1016,6 +1100,7 @@ export default function MyTravelsPage() {
                              {getPreferenceIcon('activity', activityRaw)} Activity: <span className="font-medium text-foreground">{activity}</span>
                          </p>
                      )}
+                     {/* Display other preferences */}
                      {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
                          <div className="flex items-start gap-1 pt-1">
                             <Heart className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary"/>
@@ -1027,24 +1112,66 @@ export default function MyTravelsPage() {
                             </div>
                          </div>
                      )}
-                    {travel.places && travel.places.length > 0 && (
-                        <div className="flex items-start gap-1 pt-1">
-                            <MapPin className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary"/>
-                            <div className="flex flex-wrap gap-1">
-                                {travel.places.slice(0, 3).map((place, index) => (
-                                    <span key={index} className="text-xs bg-muted text-muted-foreground px-2 py-0.5 rounded-full">{place.name}, {place.country}</span>
-                                ))}
-                                {travel.places.length > 3 && <span className="text-xs text-muted-foreground">...</span>}
+
+                     {/* Destination Matching Section */}
+                     <div className="pt-4 border-t mt-4">
+                        <h4 className="text-sm font-semibold mb-2">Destination Matches</h4>
+                         {isMatching && (
+                            <div className="flex items-center text-sm text-muted-foreground">
+                                <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Searching for best destinations...
                             </div>
-                        </div>
-                    )}
+                         )}
+                         {matchError && (
+                             <div className="flex items-center text-sm text-destructive">
+                                 <XCircle className="h-4 w-4 mr-2" /> Error: {travel.destinationMatchesError || 'Matching failed.'}
+                             </div>
+                         )}
+                         {matchCompleted && travel.destinationMatches && travel.destinationMatches.length > 0 && (
+                            <div className="space-y-2">
+                                {travel.destinationMatches.slice(0, 3).map((match, index) => (
+                                    <div key={index} className="text-xs border p-2 rounded-md bg-background">
+                                        <div className="flex justify-between items-center mb-1">
+                                             <span className="font-semibold text-primary">{index + 1}. {match.destinationIata}</span>
+                                             <span className="font-bold text-lg">{Math.round((match.finalScore ?? 0) * 100)}%</span>
+                                        </div>
+                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-muted-foreground">
+                                            <span className="flex items-center gap-1"><Euro className="h-3 w-3"/> ~€{match.priceEur ?? 'N/A'}</span>
+                                            <span className="flex items-center gap-1"><Leaf className="h-3 w-3"/> {match.co2Kg?.toFixed(1) ?? 'N/A'} kg</span>
+                                            <span className="flex items-center gap-1"><BarChart className="h-3 w-3"/> {match.stops ?? 'N/A'} stop(s)</span>
+                                            <span className="flex items-center gap-1"><Clock className="h-3 w-3"/> {match.durationMinutes ? `${Math.floor(match.durationMinutes/60)}h ${match.durationMinutes%60}m` : 'N/A'}</span>
+                                            {match.affinityScore !== undefined && <span className="flex items-center gap-1 col-span-2"><Heart className="h-3 w-3"/> Affinity: {Math.round(match.affinityScore * 100)}%</span>}
+                                        </div>
+                                        {match.errorMessage && <p className="text-destructive text-xs mt-1">{match.errorMessage}</p>}
+                                    </div>
+                                ))}
+                                {travel.destinationMatches.length > 3 && <p className="text-xs text-muted-foreground text-center mt-1">... and more</p>}
+                            </div>
+                         )}
+                          {matchCompleted && (!travel.destinationMatches || travel.destinationMatches.length === 0) && (
+                             <p className="text-sm text-muted-foreground italic">No suitable destinations found based on criteria.</p>
+                         )}
+                          {!isMatching && !matchCompleted && !matchError && (
+                             <p className="text-sm text-muted-foreground italic">Ready to find matches.</p>
+                         )}
+                     </div>
+
+
                     {(!mood && !activity && !(travel.places && travel.places.length > 0) && travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length === 0) && (
                         <p className="text-sm text-muted-foreground italic">No specific preferences set.</p>
                     )}
                 </CardContent>
-                <CardFooter className="flex justify-end pt-4 border-t">
-                    <Button variant="outline" size="sm">View Details</Button>
-                    {/* Add Edit/Delete later */}
+                <CardFooter className="flex justify-end pt-4 border-t gap-2">
+                     <Button
+                         variant="secondary"
+                         size="sm"
+                         onClick={() => triggerDestinationMatching(travel)}
+                         disabled={isMatching || !travel.dateRange?.start || !travel.dateRange?.end || !travel.departureCity} // Disable if matching or missing required data
+                         title={!travel.dateRange?.start || !travel.dateRange?.end || !travel.departureCity ? "Requires dates and departure city" : "Find or Refresh Matches"}
+                     >
+                        {isMatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Search className="mr-2 h-4 w-4" />}
+                         {isMatching ? 'Matching...' : (matchCompleted || matchError) ? 'Refresh Matches' : 'Find Matches'}
+                     </Button>
+                    {/* <Button variant="outline" size="sm">View Details</Button> */}
                 </CardFooter>
                 </Card>
              );

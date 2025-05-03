@@ -16,37 +16,10 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useToast } from '@/hooks/use-toast';
-import { Loader2, PlusCircle, Users, Link as LinkIcon, Share2, PlaneTakeoff, Calendar, Heart, MapPin, Smile, Mountain, Film, Utensils, Leaf, CalendarDays, Info, LocateFixed } from 'lucide-react'; // Added LocateFixed icon
+import { Loader2, PlusCircle, Users, Link as LinkIcon, Share2, PlaneTakeoff, Calendar, Heart, MapPin, Smile, Mountain, Film, Utensils, Leaf, CalendarDays, Info, LocateFixed } from 'lucide-react';
 import { CopyToClipboard } from '@/components/functional/CopyToClipboard';
 import { format } from 'date-fns';
-
-// Interfaces (consider moving to a shared types file)
-interface Group {
-  id?: string; // Firestore document ID
-  groupName: string;
-  createBy: string; // userId
-  createAt: Timestamp;
-  users: string[]; // Array of userIds
-}
-
-interface Place {
-  name: string;
-  coordinate?: { lat: number | null; lng: number | null };
-  country: string;
-}
-
-interface Travel {
-  id?: string; // Firestore document ID
-  groupId: string | null;
-  userId: string | null;
-  departureCity: string; // Added departure city
-  preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
-  dateRange?: { start: Timestamp; end: Timestamp } | null;
-  durationDays?: number;
-  places?: Place[];
-  createdAt: Timestamp;
-}
-
+import { type Group, type Travel } from '@/types'; // Import shared types
 
 // Define Zod schema for the new group form
 const groupFormSchema = z.object({
@@ -63,7 +36,7 @@ export default function GroupsPage() {
   const [myGroups, setMyGroups] = useState<Group[]>([]);
   const [associatedTravels, setAssociatedTravels] = useState<{ [groupId: string]: Travel[] }>({});
   const [loadingGroups, setLoadingGroups] = useState(true);
-  const [loadingTravels, setLoadingTravels] = useState<{ [groupId: string]: boolean }>({}); // Track loading per group
+  const [loadingTravels, setLoadingTravels] = useState<{ [groupId: string]: boolean }>({});
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
@@ -86,8 +59,8 @@ export default function GroupsPage() {
   const fetchGroups = useCallback(async () => {
       if (user?.uid) {
           setLoadingGroups(true);
-          setAssociatedTravels({}); // Reset travels
-          setLoadingTravels({}); // Reset travel loading state
+          setAssociatedTravels({});
+          setLoadingTravels({});
           try {
               const groupsCollection = collection(db, 'groups');
               const q = query(groupsCollection, where('users', 'array-contains', user.uid));
@@ -97,7 +70,6 @@ export default function GroupsPage() {
                   ...doc.data(),
               })) as Group[];
               setMyGroups(groupsList);
-              // After fetching groups, fetch associated travels for each group
               if (groupsList.length > 0) {
                    groupsList.forEach(group => fetchAssociatedTravelsForGroup(group.id!));
               }
@@ -114,14 +86,13 @@ export default function GroupsPage() {
       } else if (!authLoading) {
           setLoadingGroups(false);
       }
-  }, [user, authLoading, toast]); // Added fetchAssociatedTravelsForGroup to dependencies? No, called internally.
+  }, [user, authLoading, toast, fetchAssociatedTravelsForGroup]); // Added fetchAssociatedTravelsForGroup dependency
 
   // --- Fetch Travels Associated with a Specific Group ---
    const fetchAssociatedTravelsForGroup = useCallback(async (groupId: string) => {
         setLoadingTravels(prev => ({ ...prev, [groupId]: true }));
         try {
             const travelsCollection = collection(db, 'travels');
-            // Query travels where groupId matches the specific group ID
             const q = query(travelsCollection, where('groupId', '==', groupId));
             const querySnapshot = await getDocs(q);
             const travelsList = querySnapshot.docs.map(doc => ({
@@ -129,7 +100,6 @@ export default function GroupsPage() {
                 ...doc.data(),
             })) as Travel[];
 
-            // Update the state for this specific group
             setAssociatedTravels(prev => ({
                 ...prev,
                 [groupId]: travelsList,
@@ -142,7 +112,6 @@ export default function GroupsPage() {
                 title: 'Error Fetching Group Travels',
                 description: `Could not load travels for group ${groupId}.`,
             });
-            // Set empty array on error for this group to avoid infinite loading look
              setAssociatedTravels(prev => ({
                 ...prev,
                 [groupId]: [],
@@ -165,7 +134,6 @@ export default function GroupsPage() {
   useEffect(() => {
     const joinGroupId = searchParams.get('joinGroup');
     if (joinGroupId && user && isAuthenticated && !loadingGroups) {
-      // Check if user is already in the group AFTER groups have loaded
        const isAlreadyMember = myGroups.some(group => group.id === joinGroupId);
 
       if (!isAlreadyMember) {
@@ -183,12 +151,12 @@ export default function GroupsPage() {
               users: arrayUnion(user.uid)
             });
             toast({ title: 'Joined Group!', description: `You've been added to the group.` });
-            fetchGroups(); // Refetch groups to include the newly joined one
+            fetchGroups();
           } catch (error) {
             console.error("Error joining group:", error);
             toast({ variant: 'destructive', title: 'Error Joining Group', description: 'Could not join the group. Please try the link again.' });
           } finally {
-             router.replace('/groups'); // Remove query param regardless of success/fail after attempt
+             router.replace('/groups');
           }
         };
         joinGroup();
@@ -196,10 +164,9 @@ export default function GroupsPage() {
          if (isAlreadyMember) {
              toast({ title: 'Already a Member', description: 'You are already part of this group.' });
          }
-         router.replace('/groups'); // Remove query param if already member or other issues
+         router.replace('/groups');
       }
     }
-     // Reduced dependency array: only react when searchParams or user/auth state solidifies
   }, [searchParams, user, isAuthenticated, loadingGroups, router, toast, fetchGroups, myGroups]);
 
 
@@ -212,21 +179,21 @@ export default function GroupsPage() {
     setIsSubmitting(true);
 
     try {
-      const groupToAdd: Omit<Group, 'id'> = {
+      // Explicitly define the type for the object being added
+      const groupData: Omit<Group, 'id'> = {
         groupName: data.groupName,
         createBy: user.uid,
         createAt: Timestamp.now(),
-        users: [user.uid], // Creator is the first member
+        users: [user.uid],
       };
 
-      const docRef = await addDoc(collection(db, 'groups'), groupToAdd);
+      const docRef = await addDoc(collection(db, 'groups'), groupData);
       toast({
         title: 'Group Created!',
         description: `Group "${data.groupName}" has been successfully created.`,
       });
 
-      // Add the new group to the local state & initialize travels/loading state for it
-      const newGroup = { ...groupToAdd, id: docRef.id, createAt: groupToAdd.createAt };
+      const newGroup: Group = { ...groupData, id: docRef.id, createAt: groupData.createAt };
       setMyGroups(prev => [...prev, newGroup]);
       setAssociatedTravels(prev => ({ ...prev, [newGroup.id!]: [] }));
       setLoadingTravels(prev => ({ ...prev, [newGroup.id!]: false }));
@@ -249,13 +216,12 @@ export default function GroupsPage() {
 
    // --- Generate Invite Link ---
    const generateInviteLink = (groupId: string): string => {
-       // Ensure this runs only client-side
        if (typeof window === 'undefined') return '';
        const baseUrl = window.location.origin;
        return `${baseUrl}/groups?joinGroup=${groupId}`;
    };
 
-   // --- Share Handlers (Basic Examples) ---
+   // --- Share Handlers ---
    const shareOnWhatsApp = (link: string, groupName: string) => {
         if (typeof window === 'undefined') return;
        const text = encodeURIComponent(`Join my travel group "${groupName}" on OnlyFly! ${link}`);
@@ -291,10 +257,10 @@ export default function GroupsPage() {
             switch (value) {
                 case 'hiking': return <Mountain className="h-4 w-4 text-primary"/>;
                 case 'museums': return <Film className="h-4 w-4 text-primary"/>;
-                case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>; // Placeholder
+                case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>;
                 case 'nightlife': return <Users className="h-4 w-4 text-primary"/>;
                 case 'foodie': return <Utensils className="h-4 w-4 text-primary"/>;
-                 case 'other': return <Info className="h-4 w-4 text-primary"/>; // Should not happen if startsWith('other:') is checked
+                 case 'other': return <Info className="h-4 w-4 text-primary"/>;
                 default: return <Heart className="h-4 w-4 text-primary"/>;
             }
         }
@@ -352,7 +318,6 @@ export default function GroupsPage() {
         </Dialog>
       </div>
 
-      {/* Display Groups */}
        {loadingGroups ? (
           <div className="text-center py-12">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
@@ -376,21 +341,19 @@ export default function GroupsPage() {
             {myGroups.map((group) => {
                  const inviteLink = generateInviteLink(group.id!);
                  const travelsForGroup = associatedTravels[group.id!] || [];
-                 const isLoadingThisGroupTravels = loadingTravels[group.id!] === true; // Check specific group loading
+                 const isLoadingThisGroupTravels = loadingTravels[group.id!] === true;
 
                 return (
                 <Card key={group.id} className="shadow-md hover:shadow-lg transition-shadow duration-300">
                     <CardHeader>
                         <div className="flex justify-between items-start gap-4">
-                            {/* Group Info */}
-                            <div className="flex-1 min-w-0"> {/* Added flex-1 and min-w-0 */}
-                                <CardTitle className="truncate">{group.groupName}</CardTitle> {/* Added truncate */}
+                            <div className="flex-1 min-w-0">
+                                <CardTitle className="truncate">{group.groupName}</CardTitle>
                                 <CardDescription>
                                     {group.users.length} member{group.users.length !== 1 ? 's' : ''} | Created: {group.createAt?.toDate().toLocaleDateString() ?? 'N/A'}
                                 </CardDescription>
                             </div>
-                             {/* Share/Invite Section */}
-                              <div className="flex items-center flex-shrink-0 gap-1 md:gap-2"> {/* Added flex-shrink-0 */}
+                              <div className="flex items-center flex-shrink-0 gap-1 md:gap-2">
                                   <CopyToClipboard textToCopy={inviteLink}>
                                       <Button variant="outline" size="sm" className="px-2">
                                           <LinkIcon className="h-4 w-4 md:mr-1"/>
@@ -439,18 +402,23 @@ export default function GroupsPage() {
                                     const activityOther = activityRaw?.startsWith('other:') ? activityRaw.substring(6) : undefined;
                                     const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
+                                     // Safely format dates
+                                     const formattedStartDate = travel.dateRange?.start?.toDate ? format(travel.dateRange.start.toDate(), "PP") : null;
+                                     const formattedEndDate = travel.dateRange?.end?.toDate ? format(travel.dateRange.end.toDate(), "PP") : null;
+
+
                                     return (
                                         <div key={travel.id} className="border p-3 rounded-md bg-secondary/50">
                                             <p className="text-sm font-medium text-secondary-foreground mb-1.5">Trip Plan <span className="font-mono text-xs bg-background px-1 py-0.5 rounded">#{travel.id?.substring(0, 6)}</span></p>
                                             <div className="space-y-1 text-xs text-muted-foreground">
-                                                <p className="flex items-center gap-1">
+                                                 <p className="flex items-center gap-1">
                                                      <LocateFixed className="h-3 w-3"/>
                                                      Departing from: <span className="font-medium text-foreground">{travel.departureCity}</span>
                                                  </p>
-                                                {travel.dateRange ? (
+                                                 {(formattedStartDate && formattedEndDate) ? (
                                                     <p className="flex items-center gap-1">
                                                         <Calendar className="h-3 w-3"/>
-                                                        {format(travel.dateRange.start.toDate(), "PP")} - {format(travel.dateRange.end.toDate(), "PP")}
+                                                        {formattedStartDate} - {formattedEndDate}
                                                     </p>
                                                 ) : travel.durationDays ? (
                                                     <p className="flex items-center gap-1">
@@ -468,7 +436,6 @@ export default function GroupsPage() {
                                                         {getPreferenceIcon('activity', activityRaw)} Activity: <span className="font-medium text-foreground">{activity}</span>
                                                     </p>
                                                 )}
-                                                {/* Display other preferences if needed */}
                                                 {travel.preferences.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
                                                     <div className="flex items-start gap-1 pt-1">
                                                         <Heart className="h-3 w-3 mt-0.5 flex-shrink-0"/>
@@ -481,10 +448,6 @@ export default function GroupsPage() {
                                                     </div>
                                                 )}
                                             </div>
-                                            {/* Add View Details button for travel */}
-                                            {/* <div className="mt-2 flex justify-end">
-                                                <Button variant="outline" size="xs">Trip Details</Button>
-                                            </div> */}
                                         </div>
                                     );
                                 })}
@@ -492,7 +455,7 @@ export default function GroupsPage() {
                          )}
                     </CardContent>
                      <CardFooter className="flex justify-end pt-4 border-t mt-4">
-                         <Button variant="secondary" size="sm" onClick={() => router.push(`/matches?groupId=${group.id}`)}> {/* Changed href to /matches */}
+                         <Button variant="secondary" size="sm" onClick={() => router.push(`/matches?groupId=${group.id}`)}>
                               <PlusCircle className="mr-2 h-4 w-4" /> Plan Trip for Group
                          </Button>
                     </CardFooter>

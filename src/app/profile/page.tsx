@@ -1,4 +1,3 @@
-
 // src/app/profile/page.tsx
 'use client';
 
@@ -12,23 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Loader2, User, MessageSquare, Star, Leaf, Inbox } from 'lucide-react';
 import { ReviewCard } from '@/components/profile/ReviewCard'; // Import the new component
 import { useToast } from '@/hooks/use-toast';
-
-// Define the structure for a Review based on Firestore schema
-// Consider moving this to a shared types file (e.g., src/types/index.ts)
-export interface Review {
-  id: string; // Firestore document ID
-  reviewerId: string;
-  reviewedUserId: string;
-  tripId: string;
-  rating: number; // 1-5
-  co2Emissions: number; // kg CO2e
-  description: string;
-  createdAt: Timestamp;
-  // Optional fields you might add later for performance/display
-  // reviewerDisplayName?: string;
-  // reviewerAvatarUrl?: string;
-  // reviewedUserDisplayName?: string;
-}
+import { type Review } from '@/types'; // Import shared Review type
 
 export default function ProfilePage() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
@@ -128,7 +111,6 @@ export default function ProfilePage() {
   }
 
   if (!isAuthenticated) {
-     // Should be redirected by the effect, but render nothing or a redirect message as fallback
      return null;
   }
 
