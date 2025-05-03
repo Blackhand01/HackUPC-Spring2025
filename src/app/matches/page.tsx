@@ -2,7 +2,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { useForm, SubmitHandler, Controller, ControllerRenderProps } from 'react-hook-form';
+import { useForm, SubmitHandler, Controller, ControllerRenderProps, useWatch } from 'react-hook-form'; // Added useWatch
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { collection, query, where, getDocs, addDoc, Timestamp, doc, getDoc, updateDoc, setDoc } from 'firebase/firestore'; // Added updateDoc, setDoc
@@ -14,7 +14,7 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle } from 'lucide-react'; // Added new icons
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle, Timer } from 'lucide-react'; // Added Timer icon
 import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -31,6 +31,7 @@ import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssi
 import { findDestinationMatches, type FindDestinationMatchesInput, type FindDestinationMatchesOutput, type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow'; // Import destination matching flow
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import { type Travel, type Group, type Place } from '@/types'; // Import shared types
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Added Tooltip
 
 // --- Emotional Planning Constants ---
 const MOOD_OPTIONS = [
@@ -48,7 +49,7 @@ const ACTIVITY_OPTIONS = [
     { value: "foodie", label: "Foodie", icon: <Utensils className="h-4 w-4" /> },
     { value: "other", label: "Other...", icon: <Info className="h-4 w-4" /> },
 ];
-const MAX_DURATION_DAYS = 30;
+const MAX_DURATION_DAYS = 90; // Increased max duration
 
 // Example candidate destinations (replace with dynamic logic later if needed)
 const CANDIDATE_DESTINATIONS_EUROPE = ["BCN", "LIS", "DBV", "RAK", "VLC", "ATH", "NAP", "FCO", "PMI", "AGP"];
@@ -64,13 +65,14 @@ const travelFormSchema = z.object({
   mood: z.string().optional(),
   activity: z.string().optional(),
   activityOther: z.string().optional(),
-  durationDays: z.number().min(1, "Duration must be at least 1 day.").max(MAX_DURATION_DAYS).optional(),
-  // OR Date Range
-  startDate: z.date().optional().nullable(),
-  endDate: z.date().optional().nullable(),
   // Mode 2: AI
   aiPrompt: z.string().optional(),
   planningMode: z.enum(['guided', 'ai']).default('guided'),
+  // Date/Duration Selection
+  dateInputMode: z.enum(['dates', 'duration']).default('dates'),
+  startDate: z.date().optional().nullable(),
+  endDate: z.date().optional().nullable(),
+  durationDays: z.coerce.number().int().min(1, "Duration must be at least 1 day.").max(MAX_DURATION_DAYS).optional().nullable(),
 }).refine(data => {
     if (data.tripType === 'group') return !!data.groupId;
     return true;
@@ -80,9 +82,23 @@ const travelFormSchema = z.object({
     return true;
 }, { message: "Please specify the 'other' activity.", path: ["activityOther"]})
 .refine(data => {
-    // Require date range for destination matching
-    return !!data.startDate && !!data.endDate;
-}, { message: "Please select both a start and end date for destination matching.", path: ["startDate"] });
+    // Require dates OR duration based on mode
+    if (data.dateInputMode === 'dates') return !!data.startDate && !!data.endDate;
+    if (data.dateInputMode === 'duration') return !!data.durationDays;
+    return false; // Should not happen if mode is set
+}, {
+    message: "Please select both start/end dates or specify a duration.",
+    // Apply error to a common path or a specific one based on mode
+    path: ["startDate"], // Apply error to startDate for date mode failure
+})
+.refine(data => {
+    // Ensure duration is set if mode is duration
+    if (data.dateInputMode === 'duration' && !data.durationDays) return false;
+    return true;
+}, {
+    message: "Please specify the trip duration in days.",
+    path: ["durationDays"],
+});
 
 
 type TravelFormValues = z.infer<typeof travelFormSchema>;
@@ -109,7 +125,7 @@ export default function MyTravelsPage() {
   // State for Mode 1 (Sliders)
   const [moodSliderValue, setMoodSliderValue] = useState(0);
   const [activitySliderValue, setActivitySliderValue] = useState(0);
-  const [durationSliderValue, setDurationSliderValue] = useState([5]);
+  // Duration slider is removed, using input field instead
 
   // State for Mode 2 (AI Chat)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -127,14 +143,18 @@ export default function MyTravelsPage() {
       mood: MOOD_OPTIONS[0].value,
       activity: ACTIVITY_OPTIONS[0].value,
       activityOther: '',
-      // durationDays: 5, // Duration is now derived from dates or explicitly set if dates are null
       startDate: null,
       endDate: null,
+      durationDays: 5, // Default duration if mode is switched
       aiPrompt: '',
       planningMode: 'guided',
+      dateInputMode: 'dates', // Default to date selection
     },
     mode: 'onChange', // Validate on change for better feedback
   });
+
+   // Watch the date input mode to conditionally render/disable fields
+   const dateInputMode = useWatch({ control: form.control, name: 'dateInputMode' });
 
   // --- Effect for Authentication Check ---
    useEffect(() => {
@@ -185,7 +205,8 @@ export default function MyTravelsPage() {
               const groupsList = querySnapshot.docs.map(doc => ({
                   id: doc.id,
                   groupName: doc.data().groupName || `Group ${doc.id.substring(0,5)}`,
-              })) as Group[];
+                  // Add other necessary group fields if needed
+              })) as Group[]; // Ensure Group type includes needed fields
               setMyGroups(groupsList);
           } catch (error) {
               console.error('Error fetching groups for selection:', error);
@@ -206,14 +227,13 @@ export default function MyTravelsPage() {
 
   // --- Function to Trigger Destination Matching ---
   const triggerDestinationMatching = useCallback(async (travelData: Travel) => {
-    if (!travelData.id || !travelData.dateRange?.start || !travelData.dateRange?.end || !travelData.departureCity) { // Ensure required fields are present
-      toast({ variant: 'destructive', title: 'Matching Error', description: 'Missing required trip details (dates, departure city) to find matches.' });
+    // Matching now strictly requires dateRange
+    if (!travelData.id || !travelData.dateRange?.start || !travelData.dateRange?.end || !travelData.departureCity) {
+      toast({ variant: 'destructive', title: 'Matching Error', description: 'Specific dates and departure city are required to find matches.' });
       return;
     }
 
     // *** Placeholder: Derive IATA from departureCity ***
-    // In a real app, use a geocoding service or airport lookup API
-    // For now, using a hardcoded example or assuming city IS IATA (use with caution!)
     const departureIata = travelData.departureCity.substring(0,3).toUpperCase(); // VERY Basic placeholder
      if (departureIata.length !== 3) {
           toast({ variant: 'destructive', title: 'Matching Error', description: 'Could not determine IATA code for departure city.' });
@@ -247,7 +267,7 @@ export default function MyTravelsPage() {
       const activityPrefs = travelData.preferences.filter(p => p.startsWith('activity:')).map(p => p.substring(9)); // Adjusted index
 
       const matchInput: FindDestinationMatchesInput = {
-        durationDays: travelData.durationDays,
+        // durationDays is not used for matching when dates are present
         moodPreferences: moodPrefs,
         activityPreferences: activityPrefs,
         departureCityIata: departureIata, // Use derived IATA
@@ -300,11 +320,16 @@ export default function MyTravelsPage() {
         toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to add a travel plan.' });
         return;
     }
-    // Ensure dates are selected
-    if (!data.startDate || !data.endDate) {
+    // Validation based on dateInputMode
+    if (data.dateInputMode === 'dates' && (!data.startDate || !data.endDate)) {
          toast({ variant: 'destructive', title: 'Missing Dates', description: 'Please select both a start and end date.' });
          return;
     }
+     if (data.dateInputMode === 'duration' && !data.durationDays) {
+         toast({ variant: 'destructive', title: 'Missing Duration', description: 'Please specify the trip duration in days.' });
+         return;
+    }
+
     setIsSubmitting(true);
     console.log("Submitting Travel Form Data:", data); // Log form data
 
@@ -319,12 +344,17 @@ export default function MyTravelsPage() {
     let newTravelDocId: string | null = null; // To store the ID of the newly created doc
 
     try {
-       // Ensure dates are valid before creating Timestamp
-       const startDate = data.startDate instanceof Date ? data.startDate : null;
-       const endDate = data.endDate instanceof Date ? data.endDate : null;
+       // Prepare dateRange or durationDays based on mode
+       let dateRangeValue: { start: Timestamp; end: Timestamp } | null = null;
+       let durationValue: number | undefined = undefined;
 
-       if (!startDate || !endDate) {
-           throw new Error("Invalid date format submitted.");
+       if (data.dateInputMode === 'dates' && data.startDate && data.endDate) {
+           dateRangeValue = {
+               start: Timestamp.fromDate(data.startDate),
+               end: Timestamp.fromDate(data.endDate),
+           };
+       } else if (data.dateInputMode === 'duration' && data.durationDays) {
+           durationValue = data.durationDays;
        }
 
        const travelToAdd: Omit<Travel, 'id'> = {
@@ -332,17 +362,13 @@ export default function MyTravelsPage() {
         groupId: data.tripType === 'group' ? data.groupId! : null,
         departureCity: data.departureCity, // Save departure city
         preferences: preferences,
-        dateRange: { // Use validated dates
-            start: Timestamp.fromDate(startDate),
-            end: Timestamp.fromDate(endDate)
-        },
-        // durationDays is derived from dateRange, no need to store if dateRange exists
-        durationDays: undefined, // Explicitly set to undefined when dates are present
+        dateRange: dateRangeValue, // Use Timestamp or null
+        durationDays: durationValue, // Use number or undefined
         places: [], // Initialize places as empty array
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(), // Set updatedAt on creation
-        destinationMatchesStatus: 'pending', // Initial status for matching
-        // Other fields like destinationMatches, destinationMatchesError, lastMatchedAt are initially null/undefined
+        // Set matching status only if dates are provided
+        destinationMatchesStatus: dateRangeValue ? 'pending' : undefined,
       };
 
       console.log("Data being sent to Firestore:", travelToAdd); // Log data before sending
@@ -352,29 +378,34 @@ export default function MyTravelsPage() {
 
       toast({
         title: 'Travel Plan Added!',
-        description: `Your new ${data.tripType} travel plan has been saved. ${data.tripType === 'individual' ? 'Finding matches...' : ''}`,
+        description: `Your new ${data.tripType} travel plan has been saved. ${data.tripType === 'individual' && dateRangeValue ? 'Finding matches...' : ''}`,
       });
 
       const newTravelData: Travel = {
           ...travelToAdd,
           id: newTravelDocId,
-          dateRange: travelToAdd.dateRange, // Ensure dateRange is correctly passed
+          // Ensure these are correctly typed based on what was added
+          dateRange: travelToAdd.dateRange || undefined,
+          durationDays: travelToAdd.durationDays || undefined,
           createdAt: travelToAdd.createdAt,
           updatedAt: travelToAdd.updatedAt,
+          destinationMatchesStatus: travelToAdd.destinationMatchesStatus,
       };
 
        if (data.tripType === 'individual') {
             setMyIndividualTravels(prev => [...prev, newTravelData]);
-             // Trigger matching immediately after creation for individual trips
-            triggerDestinationMatching(newTravelData);
+             // Trigger matching only if dates were provided
+            if (dateRangeValue) {
+                triggerDestinationMatching(newTravelData);
+            }
        } else {
-           // For group trips, redirect to the groups page where the trip will be listed.
+           // For group trips, redirect to the groups page
            toast({ title: 'Group Trip Added', description: 'The new trip plan is now associated with the group.' });
-           router.push('/groups'); // Redirect to groups page after adding a group trip
+           router.push('/groups');
        }
 
 
-      // Reset form to default values after successful submission
+      // Reset form to default values
       form.reset({
           tripType: 'individual',
           groupId: undefined,
@@ -385,13 +416,13 @@ export default function MyTravelsPage() {
           activityOther: '',
           startDate: null,
           endDate: null,
+          durationDays: 5, // Reset durationDays
           aiPrompt: '',
           planningMode: 'guided',
-          durationDays: undefined, // Reset durationDays as well
+          dateInputMode: 'dates', // Reset date mode
       });
       setMoodSliderValue(0);
       setActivitySliderValue(0);
-      setDurationSliderValue([5]); // Reset slider visually if needed, but it's not used for saving when dates exist
       setChatHistory([]);
       setCurrentUserInput('');
       setIsAddDialogOpen(false);
@@ -403,13 +434,8 @@ export default function MyTravelsPage() {
         title: 'Error Adding Travel',
         description: `Failed to save your travel plan. ${error instanceof Error ? error.message : 'Please try again.'}`,
       });
-       // Optional: delete the partially created document if desired
-        // if (newTravelDocId) {
-        //      await deleteDoc(doc(db, 'travels', newTravelDocId));
-        // }
     } finally {
       setIsSubmitting(false);
-      // Do not reset processingMatchId here, let the matching process handle it
     }
   };
 
@@ -429,28 +455,25 @@ export default function MyTravelsPage() {
         }
     };
 
-    // This handler is likely redundant now as duration is derived from dates
-    // const handleDurationSliderChange = (value: number[]) => {
-    //     setDurationSliderValue(value);
-    //     form.setValue('durationDays', value[0], { shouldValidate: true });
-    //     // Clear dates if duration is set manually? - Decided against this logic. Dates take precedence.
-    //     // form.setValue('startDate', null, { shouldValidate: true });
-    //     // form.setValue('endDate', null, { shouldValidate: true });
-    // };
-
-    // Updated handler for DatePicker within FormField
+    // --- Handler for DatePicker within FormField ---
     const handleDateChange = (date: Date | undefined, field: ControllerRenderProps<TravelFormValues, 'startDate' | 'endDate'>) => {
         field.onChange(date); // Update RHF state
-        // Trigger validation explicitly after setting date
-        form.trigger(['startDate', 'endDate']);
-        // If both dates are set, durationDays is irrelevant for saving
-        const startDate = form.getValues('startDate');
-        const endDate = form.getValues('endDate');
-        if (startDate && endDate) {
-            form.setValue('durationDays', undefined, { shouldValidate: false }); // Clear durationDays if dates are set
-            // setDurationSliderValue([1]); // Optionally reset slider visually
-        }
+        form.trigger(['startDate', 'endDate']); // Trigger validation
     }
+
+     // --- Handler for Date Input Mode change ---
+     const handleDateInputModeChange = (value: 'dates' | 'duration') => {
+         form.setValue('dateInputMode', value);
+         // Clear the other mode's values when switching
+         if (value === 'dates') {
+             form.setValue('durationDays', null, { shouldValidate: true });
+         } else {
+             form.setValue('startDate', null, { shouldValidate: true });
+             form.setValue('endDate', null, { shouldValidate: true });
+         }
+         form.trigger(); // Re-validate the form
+     };
+
 
      // --- AI Chat Handlers ---
     const handleAiInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
@@ -517,10 +540,10 @@ export default function MyTravelsPage() {
                         const start = new Date(startDate);
                         const end = new Date(endDate);
                         if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
+                            form.setValue('dateInputMode', 'dates', { shouldValidate: true });
                             form.setValue('startDate', start, { shouldValidate: true });
                             form.setValue('endDate', end, { shouldValidate: true });
-                            form.setValue('durationDays', undefined, { shouldValidate: true }); // Clear duration if dates are set
-                            // setDurationSliderValue([1]); // Reset slider visually
+                            form.setValue('durationDays', null, { shouldValidate: true }); // Clear duration if dates are set
                             toast({ title: "AI Update", description: "Dates updated. Review and save."});
                         } else {
                              console.error("AI returned invalid or illogical date format:", startDate, endDate);
@@ -531,15 +554,16 @@ export default function MyTravelsPage() {
                          toast({ variant: 'destructive', title: "AI Date Error", description: "Could not parse dates from AI. Please set manually."});
                     }
                 } else if (durationDays) { // Fallback to durationDays if dates are not extracted
+                    form.setValue('dateInputMode', 'duration', { shouldValidate: true });
                     form.setValue('durationDays', durationDays, { shouldValidate: true });
-                    // setDurationSliderValue([durationDays]);
-                    // Clear dates if duration is set
                     form.setValue('startDate', null, { shouldValidate: true });
                     form.setValue('endDate', null, { shouldValidate: true });
-                     toast({ title: "AI Update", description: "Duration updated. Please set dates manually for matching."});
+                     toast({ title: "AI Update", description: "Duration updated. Review and save."});
                 } else {
-                     toast({ title: "AI Update", description: "Preferences updated. Please set dates manually."});
+                     // If neither dates nor duration are extracted, keep current mode and show message
+                     toast({ title: "AI Update", description: "Preferences updated. Please set dates or duration manually."});
                 }
+                 form.trigger(); // Re-validate after AI updates
             }
 
         } catch (error) {
@@ -564,19 +588,17 @@ export default function MyTravelsPage() {
     // --- Scroll Chat Area ---
     useEffect(() => {
         if (chatScrollAreaRef.current) {
-            // Find the viewport element within the ScrollArea
             const scrollViewport = chatScrollAreaRef.current.querySelector<HTMLDivElement>('[data-radix-scroll-area-viewport]');
              if (scrollViewport) {
-                // Scroll to the bottom of the viewport
                 scrollViewport.scrollTop = scrollViewport.scrollHeight;
             }
         }
-    }, [chatHistory]); // Dependency array includes chatHistory
+    }, [chatHistory]);
 
 
-     // --- Helper to parse preferences --- (Duplicate from groups, consider moving to utils)
+     // --- Helper to parse preferences ---
     const getPreference = (preferences: string[] | undefined, key: string): string | undefined => {
-         if (!preferences) return undefined; // Added check for undefined preferences
+         if (!preferences) return undefined;
         const pref = preferences.find(p => p.startsWith(`${key}:`));
         return pref ? pref.split(':').slice(1).join(':') : undefined;
     };
@@ -618,13 +640,12 @@ export default function MyTravelsPage() {
     );
   }
 
-   // Add check for authentication before rendering main content
    if (!isAuthenticated && !authLoading) {
-     // Optionally show a message or redirect, handled by useEffect already
      return null;
    }
 
   return (
+     <TooltipProvider> {/* Added TooltipProvider */}
     <div className="container mx-auto py-12 px-4">
       <div className="flex justify-between items-center mb-8">
         <h1 className="text-3xl font-bold flex items-center gap-2"><User className="h-8 w-8 text-primary"/> My Travels</h1>
@@ -639,12 +660,11 @@ export default function MyTravelsPage() {
             <DialogHeader>
               <DialogTitle className="text-2xl">Plan Your Next Adventure</DialogTitle>
               <DialogDescription>
-                Tell us about your dream trip. Is it solo or with a group? Select dates to enable matching.
+                Tell us about your dream trip. Is it solo or with a group? Specify dates for matching or duration for flexibility.
               </DialogDescription>
             </DialogHeader>
 
              <Form {...form}>
-                {/* Use a native form element here */}
                  <form onSubmit={form.handleSubmit(onSubmit)} className="grid gap-6 pt-4">
 
                     {/* Trip Type Selection */}
@@ -739,6 +759,7 @@ export default function MyTravelsPage() {
                                     <Input placeholder="e.g., Rome, London, New York" {...field} disabled={isSubmitting} />
                                 </FormControl>
                                 <FormMessage />
+                                 <p className="text-xs text-muted-foreground pt-1">Needed for destination matching.</p>
                             </FormItem>
                         )}
                      />
@@ -844,93 +865,155 @@ export default function MyTravelsPage() {
                                                 )}
                                             />
 
-                                            <FormItem>
-                                                <FormLabel className="flex items-center gap-1 text-base font-semibold"><CalendarDays className="h-5 w-5"/>Dates <span className='text-destructive'>*</span></FormLabel>
-                                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 px-4">
-                                                     <FormField
-                                                        control={form.control}
-                                                        name="startDate"
-                                                        render={({ field: startDateField }) => (
-                                                            <FormItem className="flex flex-col space-y-2">
-                                                                <FormLabel>Start Date</FormLabel>
-                                                                <Popover>
-                                                                    <PopoverTrigger asChild>
-                                                                        <FormControl>
-                                                                            <Button
-                                                                                variant={"outline"}
-                                                                                className={cn(
-                                                                                    "w-full justify-start text-left font-normal",
-                                                                                    !startDateField.value && "text-muted-foreground"
-                                                                                )}
-                                                                                disabled={isSubmitting}
-                                                                            >
-                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                {startDateField.value ? format(startDateField.value, "PPP") : <span>Pick a date</span>}
-                                                                            </Button>
-                                                                        </FormControl>
-                                                                    </PopoverTrigger>
-                                                                    <PopoverContent className="w-auto p-0">
-                                                                         <ShadCalendar
-                                                                            mode="single"
-                                                                            selected={startDateField.value ?? undefined}
-                                                                            onSelect={(date) => handleDateChange(date, startDateField)}
-                                                                            initialFocus
-                                                                            disabled={(date) => date < new Date(new Date().setHours(0,0,0,0))} // Disable past dates
-                                                                        />
-                                                                    </PopoverContent>
-                                                                </Popover>
-                                                                <FormMessage />
-                                                            </FormItem>
-                                                        )}
-                                                     />
-                                                     <FormField
-                                                        control={form.control}
-                                                        name="endDate"
-                                                        render={({ field: endDateField }) => (
-                                                            <FormItem className="flex flex-col space-y-2">
-                                                                <FormLabel>End Date</FormLabel>
-                                                                <Popover>
-                                                                     <PopoverTrigger asChild>
-                                                                         <FormControl>
-                                                                             <Button
-                                                                                variant={"outline"}
-                                                                                className={cn(
-                                                                                    "w-full justify-start text-left font-normal",
-                                                                                    !endDateField.value && "text-muted-foreground"
-                                                                                )}
-                                                                                disabled={isSubmitting || !form.watch('startDate')}
-                                                                            >
-                                                                                <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                {endDateField.value ? format(endDateField.value, "PPP") : <span>Pick a date</span>}
-                                                                            </Button>
-                                                                        </FormControl>
-                                                                    </PopoverTrigger>
-                                                                    <PopoverContent className="w-auto p-0">
-                                                                         <ShadCalendar
-                                                                            mode="single"
-                                                                            selected={endDateField.value ?? undefined}
-                                                                            onSelect={(date) => handleDateChange(date, endDateField)}
-                                                                            disabled={(date) => {
-                                                                               const startDate = form.watch('startDate');
-                                                                               return (startDate ? date < startDate : false) || date < new Date(new Date().setHours(0,0,0,0));
-                                                                            }}
-                                                                            initialFocus
-                                                                        />
-                                                                    </PopoverContent>
-                                                                </Popover>
-                                                                <FormMessage />
-                                                            </FormItem>
-                                                        )}
-                                                     />
-                                                </div>
-                                                  {/* Removed the optional duration slider as dates are now required */}
-                                            </FormItem>
+                                             {/* Date / Duration Selection */}
+                                             <FormField
+                                                control={form.control}
+                                                name="dateInputMode"
+                                                render={({ field }) => (
+                                                    <FormItem className="space-y-3">
+                                                         <FormLabel className="text-base font-semibold">Trip Timing <span className='text-destructive'>*</span></FormLabel>
+                                                         <FormControl>
+                                                            <RadioGroup
+                                                                onValueChange={(value: 'dates' | 'duration') => handleDateInputModeChange(value)}
+                                                                value={field.value}
+                                                                className="flex gap-4"
+                                                                disabled={isSubmitting}
+                                                            >
+                                                                <FormItem className="flex-1">
+                                                                     <FormControl>
+                                                                         <RadioGroupItem value="dates" id="dates" className="sr-only" />
+                                                                     </FormControl>
+                                                                     <FormLabel htmlFor="dates" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary justify-center font-normal">
+                                                                         <CalendarDays className="h-5 w-5 mr-1" /> Select Dates
+                                                                     </FormLabel>
+                                                                </FormItem>
+                                                                 <FormItem className="flex-1">
+                                                                     <FormControl>
+                                                                         <RadioGroupItem value="duration" id="duration" className="sr-only" />
+                                                                     </FormControl>
+                                                                      <FormLabel htmlFor="duration" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary justify-center font-normal">
+                                                                          <Timer className="h-5 w-5 mr-1" /> Specify Duration
+                                                                      </FormLabel>
+                                                                </FormItem>
+                                                            </RadioGroup>
+                                                         </FormControl>
+                                                          <FormMessage /> {/* For the RadioGroup itself if needed */}
+
+                                                         {/* Conditional Date Pickers */}
+                                                          <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4 px-4 pt-4", field.value !== 'dates' && 'hidden')}>
+                                                              <FormField
+                                                                    control={form.control}
+                                                                    name="startDate"
+                                                                    render={({ field: startDateField }) => (
+                                                                        <FormItem className="flex flex-col space-y-2">
+                                                                            <FormLabel>Start Date</FormLabel>
+                                                                            <Popover>
+                                                                                <PopoverTrigger asChild>
+                                                                                     <FormControl>
+                                                                                        <Button
+                                                                                            variant={"outline"}
+                                                                                            className={cn(
+                                                                                                "w-full justify-start text-left font-normal",
+                                                                                                !startDateField.value && "text-muted-foreground"
+                                                                                            )}
+                                                                                            disabled={isSubmitting || field.value !== 'dates'}
+                                                                                        >
+                                                                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                            {startDateField.value ? format(startDateField.value, "PPP") : <span>Pick a date</span>}
+                                                                                        </Button>
+                                                                                    </FormControl>
+                                                                                </PopoverTrigger>
+                                                                                 <PopoverContent className="w-auto p-0">
+                                                                                    <ShadCalendar
+                                                                                        mode="single"
+                                                                                        selected={startDateField.value ?? undefined}
+                                                                                        onSelect={(date) => handleDateChange(date, startDateField)}
+                                                                                        initialFocus
+                                                                                        disabled={(date) => date < new Date(new Date().setHours(0,0,0,0))} // Disable past dates
+                                                                                    />
+                                                                                </PopoverContent>
+                                                                            </Popover>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}
+                                                              />
+                                                               <FormField
+                                                                    control={form.control}
+                                                                    name="endDate"
+                                                                    render={({ field: endDateField }) => (
+                                                                        <FormItem className="flex flex-col space-y-2">
+                                                                            <FormLabel>End Date</FormLabel>
+                                                                            <Popover>
+                                                                                <PopoverTrigger asChild>
+                                                                                     <FormControl>
+                                                                                         <Button
+                                                                                            variant={"outline"}
+                                                                                            className={cn(
+                                                                                                "w-full justify-start text-left font-normal",
+                                                                                                !endDateField.value && "text-muted-foreground"
+                                                                                            )}
+                                                                                            disabled={isSubmitting || field.value !== 'dates' || !form.watch('startDate')}
+                                                                                        >
+                                                                                            <CalendarIcon className="mr-2 h-4 w-4" />
+                                                                                            {endDateField.value ? format(endDateField.value, "PPP") : <span>Pick a date</span>}
+                                                                                        </Button>
+                                                                                     </FormControl>
+                                                                                </PopoverTrigger>
+                                                                                 <PopoverContent className="w-auto p-0">
+                                                                                     <ShadCalendar
+                                                                                        mode="single"
+                                                                                        selected={endDateField.value ?? undefined}
+                                                                                        onSelect={(date) => handleDateChange(date, endDateField)}
+                                                                                        disabled={(date) => {
+                                                                                           const startDate = form.watch('startDate');
+                                                                                           return (startDate ? date < startDate : false) || date < new Date(new Date().setHours(0,0,0,0));
+                                                                                        }}
+                                                                                        initialFocus
+                                                                                    />
+                                                                                </PopoverContent>
+                                                                            </Popover>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}
+                                                               />
+                                                          </div>
+
+                                                          {/* Conditional Duration Input */}
+                                                          <div className={cn("px-4 pt-4", field.value !== 'duration' && 'hidden')}>
+                                                               <FormField
+                                                                    control={form.control}
+                                                                    name="durationDays"
+                                                                    render={({ field: durationField }) => (
+                                                                        <FormItem>
+                                                                            <FormLabel>Duration (days)</FormLabel>
+                                                                             <FormControl>
+                                                                                <Input
+                                                                                    type="number"
+                                                                                    min="1"
+                                                                                    max={MAX_DURATION_DAYS}
+                                                                                    placeholder="e.g., 7"
+                                                                                    {...durationField}
+                                                                                    value={durationField.value ?? ''} // Handle null/undefined for input value
+                                                                                    disabled={isSubmitting || field.value !== 'duration'}
+                                                                                />
+                                                                             </FormControl>
+                                                                            <FormMessage />
+                                                                        </FormItem>
+                                                                    )}
+                                                                />
+                                                          </div>
+                                                          {/* Display top-level form errors related to date/duration refinement */}
+                                                          {form.formState.errors.startDate?.type === 'refine' && (
+                                                            <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.startDate.message}</p>
+                                                           )}
+                                                            {form.formState.errors.durationDays?.type === 'refine' && (
+                                                            <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.durationDays.message}</p>
+                                                           )}
+                                                    </FormItem>
+                                                )}
+                                            />
 
 
-                                             {/* Display top-level form errors related to date refinement */}
-                                             {form.formState.errors.startDate?.type === 'refine' && (
-                                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.startDate.message}</p>
-                                             )}
                                          </TabsContent>
 
                                         <TabsContent value="ai">
@@ -943,7 +1026,7 @@ export default function MyTravelsPage() {
                                                     {chatHistory.map((chat) => (
                                                         <div key={chat.timestamp} className={cn("mb-3 flex", chat.sender === 'user' ? 'justify-end' : 'justify-start')}>
                                                             <div className={cn(
-                                                                "rounded-lg p-2 px-3 max-w-[80%] text-sm break-words", // Added break-words
+                                                                "rounded-lg p-2 px-3 max-w-[80%] text-sm break-words",
                                                                 chat.sender === 'user' ? 'bg-primary text-primary-foreground' : 'bg-background text-foreground border'
                                                             )}>
                                                                 {chat.message}
@@ -957,7 +1040,6 @@ export default function MyTravelsPage() {
                                                             </div>
                                                         </div>
                                                     )}
-                                                    {/* Removed div with id="end-of-chat" as ScrollArea handles scrolling */}
                                                 </ScrollArea>
                                                  <div className="flex items-center gap-2">
                                                      <Textarea
@@ -978,14 +1060,13 @@ export default function MyTravelsPage() {
                                         </TabsContent>
                                     </Tabs>
                                 </FormControl>
-                                {/* Removed FormMessage here as errors are handled within fields */}
                             </FormItem>
                         )}
                     />
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-                        <Button type="submit" disabled={isSubmitting || isAiLoading || !form.formState.isValid}> {/* Disable if form is invalid */}
+                        <Button type="submit" disabled={isSubmitting || isAiLoading || !form.formState.isValid}>
                         {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
                         </Button>
@@ -1037,7 +1118,7 @@ export default function MyTravelsPage() {
              const isMatching = processingMatchId === travel.id || travel.destinationMatchesStatus === 'processing';
              const matchCompleted = travel.destinationMatchesStatus === 'completed';
              const matchError = travel.destinationMatchesStatus === 'error';
-
+             const canMatch = !!travel.dateRange?.start && !!travel.dateRange?.end && !!travel.departureCity; // Can match only if dates and departure city are set
 
              return (
                 <Card key={travel.id} className="shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col">
@@ -1058,10 +1139,10 @@ export default function MyTravelsPage() {
                             <Calendar className="h-4 w-4"/>
                             {formattedStartDate} - {formattedEndDate}
                         </p>
-                     ) : travel.durationDays ? ( // Fallback to durationDays if dateRange is missing (legacy data?)
+                     ) : travel.durationDays ? (
                          <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
-                            <CalendarDays className="h-4 w-4"/>
-                            {travel.durationDays} day{travel.durationDays !== 1 ? 's' : ''} (Dates not set)
+                            <Timer className="h-4 w-4"/>
+                            {travel.durationDays} day{travel.durationDays !== 1 ? 's' : ''} (Flexible Dates)
                          </p>
                      ) : null}
                 </CardHeader>
@@ -1076,7 +1157,6 @@ export default function MyTravelsPage() {
                              {getPreferenceIcon('activity', activityRaw)} Activity: <span className="font-medium text-foreground">{activity}</span>
                          </p>
                      )}
-                     {/* Display other preferences */}
                      {travel.preferences?.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length > 0 && (
                          <div className="flex items-start gap-1 pt-1">
                             <Heart className="h-4 w-4 mt-0.5 flex-shrink-0 text-primary"/>
@@ -1092,17 +1172,17 @@ export default function MyTravelsPage() {
                      {/* Destination Matching Section */}
                      <div className="pt-4 border-t mt-4">
                         <h4 className="text-sm font-semibold mb-2">Destination Matches</h4>
-                         {isMatching && (
+                         {!canMatch ? (
+                            <p className="text-sm text-muted-foreground italic">Specify exact dates and departure city to enable matching.</p>
+                         ) : isMatching ? (
                             <div className="flex items-center text-sm text-muted-foreground">
                                 <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Searching for best destinations...
                             </div>
-                         )}
-                         {matchError && (
+                         ) : matchError ? (
                              <div className="flex items-center text-sm text-destructive">
                                  <XCircle className="h-4 w-4 mr-2" /> Error: {travel.destinationMatchesError || 'Matching failed.'}
                              </div>
-                         )}
-                         {matchCompleted && travel.destinationMatches && travel.destinationMatches.length > 0 && (
+                         ) : matchCompleted && travel.destinationMatches && travel.destinationMatches.length > 0 ? (
                             <div className="space-y-2">
                                 {travel.destinationMatches.slice(0, 3).map((match, index) => (
                                     <div key={index} className="text-xs border p-2 rounded-md bg-background">
@@ -1122,11 +1202,9 @@ export default function MyTravelsPage() {
                                 ))}
                                 {travel.destinationMatches.length > 3 && <p className="text-xs text-muted-foreground text-center mt-1">... and more</p>}
                             </div>
-                         )}
-                          {matchCompleted && (!travel.destinationMatches || travel.destinationMatches.length === 0) && (
+                         ) : matchCompleted && (!travel.destinationMatches || travel.destinationMatches.length === 0) ? (
                              <p className="text-sm text-muted-foreground italic">No suitable destinations found based on criteria.</p>
-                         )}
-                          {!isMatching && !matchCompleted && !matchError && (
+                         ) : (
                              <p className="text-sm text-muted-foreground italic">Ready to find matches.</p>
                          )}
                      </div>
@@ -1137,16 +1215,28 @@ export default function MyTravelsPage() {
                     )}
                 </CardContent>
                 <CardFooter className="flex justify-end pt-4 border-t gap-2">
-                     <Button
-                         variant="secondary"
-                         size="sm"
-                         onClick={() => triggerDestinationMatching(travel)}
-                         disabled={isMatching || !travel.dateRange?.start || !travel.dateRange?.end || !travel.departureCity} // Disable if matching or missing required data
-                         title={!travel.dateRange?.start || !travel.dateRange?.end || !travel.departureCity ? "Requires dates and departure city" : "Find or Refresh Matches"}
-                     >
-                        {isMatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Search className="mr-2 h-4 w-4" />}
-                         {isMatching ? 'Matching...' : (matchCompleted || matchError) ? 'Refresh Matches' : 'Find Matches'}
-                     </Button>
+                     <Tooltip>
+                        <TooltipTrigger asChild>
+                            {/* Wrap button in span to allow tooltip when disabled */}
+                            <span tabIndex={!canMatch ? 0 : -1}>
+                                <Button
+                                    variant="secondary"
+                                    size="sm"
+                                    onClick={() => triggerDestinationMatching(travel)}
+                                    disabled={isMatching || !canMatch}
+                                    aria-disabled={!canMatch} // For accessibility
+                                >
+                                    {isMatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Search className="mr-2 h-4 w-4" />}
+                                    {isMatching ? 'Matching...' : (matchCompleted || matchError) ? 'Refresh Matches' : 'Find Matches'}
+                                </Button>
+                             </span>
+                        </TooltipTrigger>
+                         {!canMatch && (
+                             <TooltipContent>
+                                <p>Requires specific dates and departure city</p>
+                            </TooltipContent>
+                         )}
+                     </Tooltip>
                     {/* <Button variant="outline" size="sm">View Details</Button> */}
                 </CardFooter>
                 </Card>
@@ -1155,5 +1245,6 @@ export default function MyTravelsPage() {
         </div>
       )}
     </div>
+     </TooltipProvider>
   );
 }

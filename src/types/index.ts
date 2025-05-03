@@ -28,8 +28,8 @@ export interface Travel {
   userId: string | null;
   departureCity: string;
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
-  dateRange?: { start: Timestamp; end: Timestamp } | null;
-  durationDays?: number;
+  dateRange?: { start: Timestamp; end: Timestamp } | null; // Make optional
+  durationDays?: number; // Make optional
   places?: Place[]; // Candidate or selected places
   createdAt: Timestamp;
   updatedAt?: Timestamp;
@@ -58,6 +58,8 @@ export interface Property {
     city: string;
     country: string;
     coordinates?: { lat: number | null; lng: number | null };
+    // Potential addition: IATA code for the nearest airport
+    nearestAirportIata?: string;
   };
   description: string;
   amenities: string[];
