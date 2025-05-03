@@ -82,15 +82,25 @@ export default function PropertiesPage() {
 
   // Effect for Authentication Check
   useEffect(() => {
-    if (!authLoading && !isAuthenticated) {
-      router.push('/login');
+    // Wait until auth loading is complete before checking authentication
+    if (!authLoading) {
+        if (!isAuthenticated) {
+            // console.log("PropertiesPage: User not authenticated, redirecting to /login");
+            router.push('/login');
+        } else {
+            // console.log("PropertiesPage: User is authenticated.");
+        }
+    } else {
+        // console.log("PropertiesPage: Auth state still loading...");
     }
   }, [authLoading, isAuthenticated, router]);
+
 
   // Effect for Fetching Properties
   useEffect(() => {
     const fetchProperties = async () => {
       if (user?.uid) {
+        // console.log(`PropertiesPage: Fetching properties for user ${user.uid}`);
         setLoadingProperties(true);
         try {
           const propertiesCollection = collection(db, 'properties');
@@ -100,6 +110,7 @@ export default function PropertiesPage() {
             id: doc.id,
             ...doc.data(),
           })) as Property[];
+          // console.log(`PropertiesPage: Fetched ${propertiesList.length} properties.`);
           setProperties(propertiesList);
         } catch (error) {
           console.error('Error fetching properties:', error);
@@ -113,14 +124,19 @@ export default function PropertiesPage() {
         }
       } else if (!authLoading) {
         // If auth is done loading and there's no user, stop loading properties
+        // console.log("PropertiesPage: No user ID found after auth load, skipping property fetch.");
         setLoadingProperties(false);
       }
     };
 
-    if (isAuthenticated) {
+    // Only fetch if authenticated and auth loading is complete
+    if (!authLoading && isAuthenticated && user) {
       fetchProperties();
+    } else if (!authLoading && !isAuthenticated) {
+        // If not authenticated after loading, ensure loading state is false
+        setLoadingProperties(false);
     }
-  }, [user, isAuthenticated, authLoading, toast]); // Added isAuthenticated and authLoading
+  }, [user, isAuthenticated, authLoading, toast]); // Dependencies updated
 
   const onSubmit: SubmitHandler<PropertyFormValues> = async (data) => {
     if (!user) {
@@ -128,6 +144,7 @@ export default function PropertiesPage() {
         return;
     }
     setIsSubmitting(true);
+    // console.log("PropertiesPage: Submitting new property data:", data);
 
     try {
       const propertyToAdd: Omit<Property, 'id'> = {
@@ -151,13 +168,14 @@ export default function PropertiesPage() {
       };
 
       const docRef = await addDoc(collection(db, 'properties'), propertyToAdd);
+      // console.log("PropertiesPage: Property added with ID:", docRef.id);
       toast({
         title: 'Property Added!',
         description: `Your property "${data.title}" has been successfully added.`,
       });
 
       // Add the new property to the local state immediately for better UX
-      setProperties(prev => [...prev, { ...propertyToAdd, id: docRef.id }]);
+      setProperties(prev => [...prev, { ...propertyToAdd, id: docRef.id, createdAt: propertyToAdd.createdAt, updatedAt: propertyToAdd.updatedAt }]);
 
       form.reset(); // Reset the form
       setIsAddDialogOpen(false); // Close the dialog
@@ -174,8 +192,9 @@ export default function PropertiesPage() {
     }
   };
 
-  if (authLoading || (!isAuthenticated && !authLoading)) {
-     // Show loading spinner while checking auth or if redirecting
+  // Centralized Loading/Redirect Logic
+  if (authLoading) {
+    // console.log("PropertiesPage: Showing loading spinner (authLoading)");
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -183,6 +202,21 @@ export default function PropertiesPage() {
     );
   }
 
+  // If loading is complete but user is not authenticated, the useEffect hook will handle the redirect.
+  // We can optionally show a "Redirecting..." message or the spinner again briefly.
+  if (!isAuthenticated) {
+    // console.log("PropertiesPage: Showing loading spinner (redirecting)");
+     // Or return null, or a "Redirecting..." message
+     return (
+        <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
+            <Loader2 className="h-16 w-16 animate-spin text-primary" />
+            <p className="ml-4">Redirecting to login...</p>
+        </div>
+    );
+  }
+
+  // If authenticated, render the page content
+  // console.log("PropertiesPage: Rendering page content for authenticated user.");
   return (
     <div className="container mx-auto py-12 px-4">
       <div className="flex justify-between items-center mb-8">
@@ -319,11 +353,9 @@ export default function PropertiesPage() {
             <CardDescription>Add your first property to start swapping!</CardDescription>
           </CardHeader>
           <CardContent>
-            <DialogTrigger asChild>
-               <Button onClick={() => setIsAddDialogOpen(true)}>
-                 <PlusCircle className="mr-2 h-4 w-4" /> Add Your First Property
-               </Button>
-            </DialogTrigger>
+             <Button onClick={() => setIsAddDialogOpen(true)}> {/* Changed DialogTrigger to simple Button */}
+               <PlusCircle className="mr-2 h-4 w-4" /> Add Your First Property
+             </Button>
           </CardContent>
         </Card>
       ) : (
@@ -368,4 +400,3 @@ export default function PropertiesPage() {
     </div>
   );
 }
-```

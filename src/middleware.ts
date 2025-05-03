@@ -13,31 +13,33 @@ export function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
   const sessionToken = request.cookies.get('sessionToken')?.value; // Check for a session token cookie
 
-  // Simulate authentication check based on the presence of a token
-  const isAuthenticated = !!sessionToken; // Basic check based on cookie presence
+  // Determine authentication status based on the presence of the token
+  const isAuthenticated = !!sessionToken;
 
-  const isPublicRoute = publicRoutes.includes(pathname);
   const isAuthRoute = authRoutes.includes(pathname);
-  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route)); // Check if route starts with a protected path
+  const isProtectedRoute = protectedRoutes.some(route => pathname.startsWith(route));
+
+  // Debugging logs (optional, remove in production)
+  // console.log(`Middleware: Pathname=${pathname}, IsAuthenticated=${isAuthenticated}, IsAuthRoute=${isAuthRoute}, IsProtectedRoute=${isProtectedRoute}`);
 
   // If the user is authenticated and trying to access an auth route (login/register),
   // redirect them to the homepage (/)
   if (isAuthenticated && isAuthRoute) {
-    // console.log(`Authenticated user accessing auth route ${pathname}, redirecting to /`);
+    // console.log(`Middleware: Authenticated user on auth route ${pathname}. Redirecting to /`);
     return NextResponse.redirect(new URL('/', request.url));
   }
 
-  // If the user is not authenticated and trying to access a protected route,
+  // If the user is NOT authenticated and trying to access a protected route,
   // redirect them to the login page.
   if (!isAuthenticated && isProtectedRoute) {
-    // console.log(`Unauthenticated user accessing protected route ${pathname}, redirecting to /login`);
+    // console.log(`Middleware: Unauthenticated user on protected route ${pathname}. Redirecting to /login`);
     const loginUrl = new URL('/login', request.url);
-    // Optionally add a redirect query parameter
     loginUrl.searchParams.set('redirectedFrom', pathname); // Add redirect info
     return NextResponse.redirect(loginUrl);
   }
 
   // Allow the request to proceed if none of the above conditions are met
+  // console.log(`Middleware: Allowing request for ${pathname}`);
   return NextResponse.next();
 }
 
