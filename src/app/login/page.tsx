@@ -10,6 +10,8 @@ import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { useToast } from '@/hooks/use-toast';
 import { Loader2, Eye, EyeOff } from 'lucide-react';
+import { useRouter } from 'next/navigation'; // Import useRouter
+import { useAuth } from '@/context/AuthContext'; // Import useAuth
 
 const loginSchema = z.object({
   email: z.string().email({ message: 'Invalid email address.' }),
@@ -22,6 +24,8 @@ export default function LoginPage() {
   const { toast } = useToast();
   const [isLoading, setIsLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const router = useRouter(); // Initialize useRouter
+  const { login } = useAuth(); // Get the login function from context
 
   const form = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -48,9 +52,9 @@ export default function LoginPage() {
         title: 'Login Successful!',
         description: 'Welcome back to OnlyFly.',
       });
-      // Redirect user to dashboard or relevant page
-      // Example: router.push('/dashboard');
-      form.reset();
+      login(); // Update authentication state
+      router.push('/matches'); // Redirect user to matches page on success
+      // form.reset(); // Reset form removed, as we are redirecting
     } else {
        toast({
         title: 'Login Failed',
@@ -79,6 +83,7 @@ export default function LoginPage() {
                 placeholder="you@example.com"
                 {...form.register('email')}
                 aria-invalid={form.formState.errors.email ? 'true' : 'false'}
+                disabled={isLoading}
               />
               {form.formState.errors.email && (
                 <p className="text-sm text-destructive">{form.formState.errors.email.message}</p>
@@ -92,6 +97,7 @@ export default function LoginPage() {
                 placeholder="••••••••"
                 {...form.register('password')}
                 aria-invalid={form.formState.errors.password ? 'true' : 'false'}
+                 disabled={isLoading}
               />
                <Button
                   type="button"
@@ -100,6 +106,7 @@ export default function LoginPage() {
                   className="absolute right-1 top-7 h-7 w-7"
                   onClick={togglePasswordVisibility}
                   aria-label={showPassword ? "Hide password" : "Show password"}
+                   disabled={isLoading}
                 >
                   {showPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
                 </Button>
