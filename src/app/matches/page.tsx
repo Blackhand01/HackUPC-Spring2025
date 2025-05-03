@@ -1,3 +1,4 @@
+// src/app/matches/page.tsx
 'use client';
 
 import { useState } from 'react';
@@ -10,7 +11,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
-import { Loader2, Sparkles, MapPin, Calendar, Leaf } from 'lucide-react';
+import { Loader2, Sparkles, MapPin, Calendar, Leaf, AlertTriangle } from 'lucide-react';
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 
 const matchesSchema = z.object({
@@ -40,7 +41,7 @@ export default function MatchesPage() {
   const onSubmit: SubmitHandler<MatchesFormValues> = async (data) => {
     setIsLoading(true);
     setError(null);
-    setMatchesResult(null);
+    setMatchesResult(null); // Reset results before new request
     console.log('Generating matches with data:', data);
 
     try {
@@ -55,9 +56,14 @@ export default function MatchesPage() {
       setMatchesResult(result);
     } catch (e) {
       console.error('Error generating matches:', e);
-      setError('Failed to generate matches. Please try again.');
+      let errorMessage = 'Failed to generate matches. Please try again.';
+      // Basic check for common API key issues
+      if (e instanceof Error && /API key|credential|permission/i.test(e.message)) {
+        errorMessage = 'Failed to generate matches. There might be an issue with the AI service configuration. Please contact support if the problem persists.';
+      }
+      setError(errorMessage);
     } finally {
-      setIsLoading(false);
+      setIsLoading(false); // Ensure loading is stopped regardless of success or failure
     }
   };
 
@@ -72,7 +78,8 @@ export default function MatchesPage() {
         </CardHeader>
         <CardContent>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-6">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            {/* Form fields remain the same */}
+             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="space-y-2">
                 <Label htmlFor="userPreferences" className="flex items-center gap-1"><MapPin className="h-4 w-4"/>Your Preferences</Label>
                 <Textarea
@@ -81,6 +88,7 @@ export default function MatchesPage() {
                   {...form.register('userPreferences')}
                   rows={4}
                   aria-invalid={form.formState.errors.userPreferences ? 'true' : 'false'}
+                  disabled={isLoading} // Disable form during loading
                 />
                 {form.formState.errors.userPreferences && (
                   <p className="text-sm text-destructive">{form.formState.errors.userPreferences.message}</p>
@@ -94,6 +102,7 @@ export default function MatchesPage() {
                   {...form.register('accommodationDetails')}
                   rows={4}
                   aria-invalid={form.formState.errors.accommodationDetails ? 'true' : 'false'}
+                  disabled={isLoading} // Disable form during loading
                 />
                 {form.formState.errors.accommodationDetails && (
                   <p className="text-sm text-destructive">{form.formState.errors.accommodationDetails.message}</p>
@@ -108,6 +117,7 @@ export default function MatchesPage() {
                     placeholder="e.g., August 1st - 15th, 2024, Christmas holidays"
                     {...form.register('travelDates')}
                      aria-invalid={form.formState.errors.travelDates ? 'true' : 'false'}
+                     disabled={isLoading} // Disable form during loading
                   />
                    {form.formState.errors.travelDates && (
                     <p className="text-sm text-destructive">{form.formState.errors.travelDates.message}</p>
@@ -119,6 +129,7 @@ export default function MatchesPage() {
                     id="greenScorePreferences"
                     placeholder="e.g., High green score, eco-friendly focus"
                     {...form.register('greenScorePreferences')}
+                    disabled={isLoading} // Disable form during loading
                   />
                 </div>
             </div>
@@ -130,6 +141,7 @@ export default function MatchesPage() {
         </CardContent>
       </Card>
 
+      {/* Loading State */}
       {isLoading && (
          <div className="text-center p-8">
             <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto mb-4" />
@@ -137,14 +149,17 @@ export default function MatchesPage() {
         </div>
       )}
 
-      {error && (
+      {/* Error State */}
+      {error && !isLoading && ( // Show error only when not loading
         <Alert variant="destructive" className="mb-8">
+          <AlertTriangle className="h-4 w-4"/>
           <AlertTitle>Error</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       )}
 
-      {matchesResult && matchesResult.matches.length > 0 && (
+      {/* Success State - Matches Found */}
+      {matchesResult && matchesResult.matches?.length > 0 && !isLoading && !error && ( // Added checks for isLoading and error
         <Card className="shadow-lg">
           <CardHeader>
             <CardTitle className="text-xl font-bold">Potential Matches Found!</CardTitle>
@@ -166,8 +181,10 @@ export default function MatchesPage() {
         </Card>
       )}
 
-       {matchesResult && matchesResult.matches.length === 0 && !isLoading && (
+       {/* Success State - No Matches Found */}
+       {matchesResult && matchesResult.matches?.length === 0 && !isLoading && !error && ( // Added checks for isLoading and error
          <Alert>
+          <Sparkles className="h-4 w-4"/>
            <AlertTitle>No Matches Found</AlertTitle>
            <AlertDescription>We couldn't find any perfect matches with your current criteria. Try adjusting your preferences or dates.</AlertDescription>
          </Alert>
