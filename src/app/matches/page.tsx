@@ -15,7 +15,7 @@ import { Textarea } from '@/components/ui/textarea'; // Keep Textarea for potent
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users, Utensils, Info, CalendarDays } from 'lucide-react'; // Added icons for planning
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users, Utensils, Info, CalendarDays, Leaf } from 'lucide-react'; // Added icons for planning, including Leaf
 import { useToast } from '@/hooks/use-toast';
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarIcon } from "lucide-react";
@@ -49,7 +49,7 @@ const MOOD_OPTIONS = [
     { value: "adventurous", label: "Adventurous", icon: <Mountain className="h-4 w-4" /> },
     { value: "cultural", label: "Cultural", icon: <Film className="h-4 w-4" /> },
     { value: "social", label: "Social", icon: <Users className="h-4 w-4" /> },
-    { value: "nature", label: "Nature", icon: <Leaf className="h-4 w-4" /> }, // Assuming Leaf icon exists or use different one
+    { value: "nature", label: "Nature", icon: <Leaf className="h-4 w-4" /> }, // Using imported Leaf icon
 ];
 const ACTIVITY_OPTIONS = [
     { value: "hiking", label: "Hiking", icon: <Mountain className="h-4 w-4" /> },
@@ -427,7 +427,7 @@ export default function MyTravelsPage() {
                                     <PopoverContent className="w-auto p-0">
                                     <ShadCalendar
                                         mode="single"
-                                        selected={form.watch('startDate')}
+                                        selected={form.watch('startDate') ?? undefined}
                                         onSelect={(date) => handleDateChange(date, 'startDate')}
                                         initialFocus
                                     />
@@ -454,7 +454,7 @@ export default function MyTravelsPage() {
                                     <PopoverContent className="w-auto p-0">
                                     <ShadCalendar
                                         mode="single"
-                                        selected={form.watch('endDate')}
+                                        selected={form.watch('endDate') ?? undefined}
                                         onSelect={(date) => handleDateChange(date, 'endDate')}
                                         disabled={(date) =>
                                             form.watch('startDate') ? date < form.watch('startDate')! : false
@@ -630,4 +630,5 @@ export default function MyTravelsPage() {
     </div>
   );
 }
+    
     
