@@ -3,7 +3,7 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react'; // Added useRef
-import { useForm, SubmitHandler, Controller } from 'react-hook-form';
+import { useForm, SubmitHandler, Controller, ControllerRenderProps } from 'react-hook-form'; // Added ControllerRenderProps
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
 import { collection, query, where, getDocs, addDoc, Timestamp, doc, getDoc } from 'firebase/firestore';
@@ -354,7 +354,7 @@ export default function MyTravelsPage() {
     };
 
     // Updated handler for DatePicker within FormField
-    const handleDateChange = (date: Date | undefined, field: ControllerRenderProps<TravelFormValues, 'startDate'> | ControllerRenderProps<TravelFormValues, 'endDate'>) => {
+    const handleDateChange = (date: Date | undefined, field: ControllerRenderProps<TravelFormValues, 'startDate' | 'endDate'>) => {
         field.onChange(date); // Update RHF state
         // If both dates are set, clear durationDays
         const startDate = form.getValues('startDate');
@@ -658,31 +658,29 @@ export default function MyTravelsPage() {
                                                     <FormItem>
                                                         <FormLabel className="flex items-center gap-1 text-base font-semibold"><Smile className="h-5 w-5"/>Mood</FormLabel>
                                                         <FormControl>
-                                                            <>
-                                                                <Slider
-                                                                    id="mood-slider"
-                                                                    min={0}
-                                                                    max={MOOD_OPTIONS.length - 1}
-                                                                    step={1}
-                                                                    value={[moodSliderValue]}
-                                                                    onValueChange={handleMoodSliderChange}
-                                                                    className={cn("w-[95%] mx-auto pt-2")}
-                                                                    disabled={isSubmitting}
-                                                                    aria-label="Select Mood"
-                                                                />
-                                                                <div className="flex justify-between text-xs text-muted-foreground px-2">
-                                                                    {MOOD_OPTIONS.map((opt, index) => (
-                                                                        <span key={opt.value} className={cn(index === moodSliderValue && "font-bold text-primary")}>
-                                                                            {opt.label}
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                                <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
-                                                                    {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
-                                                                </p>
-                                                            </>
+                                                            <Slider
+                                                                id="mood-slider"
+                                                                min={0}
+                                                                max={MOOD_OPTIONS.length - 1}
+                                                                step={1}
+                                                                value={[moodSliderValue]}
+                                                                onValueChange={handleMoodSliderChange}
+                                                                className={cn("w-[95%] mx-auto pt-2")}
+                                                                disabled={isSubmitting}
+                                                                aria-label="Select Mood"
+                                                            />
                                                         </FormControl>
-                                                         <FormMessage />
+                                                        <div className="flex justify-between text-xs text-muted-foreground px-2">
+                                                            {MOOD_OPTIONS.map((opt, index) => (
+                                                                <span key={opt.value} className={cn(index === moodSliderValue && "font-bold text-primary")}>
+                                                                    {opt.label}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                        <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
+                                                            {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
+                                                        </p>
+                                                        <FormMessage />
                                                     </FormItem>
                                                 )}
                                             />
@@ -695,30 +693,28 @@ export default function MyTravelsPage() {
                                                      <FormItem>
                                                         <FormLabel className="flex items-center gap-1 text-base font-semibold"><Mountain className="h-5 w-5"/>Activity</FormLabel>
                                                          <FormControl>
-                                                             <>
-                                                                <Slider
-                                                                    id="activity-slider"
-                                                                    min={0}
-                                                                    max={ACTIVITY_OPTIONS.length - 1}
-                                                                    step={1}
-                                                                    value={[activitySliderValue]}
-                                                                    onValueChange={handleActivitySliderChange}
-                                                                    className={cn("w-[95%] mx-auto pt-2")}
-                                                                    disabled={isSubmitting}
-                                                                    aria-label="Select Activity"
-                                                                />
-                                                                <div className="flex justify-between text-xs text-muted-foreground px-2">
-                                                                    {ACTIVITY_OPTIONS.map((opt, index) => (
-                                                                        <span key={opt.value} className={cn(index === activitySliderValue && "font-bold text-primary")}>
-                                                                            {opt.label}
-                                                                        </span>
-                                                                    ))}
-                                                                </div>
-                                                                <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
-                                                                    {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
-                                                                </p>
-                                                             </>
+                                                            <Slider
+                                                                id="activity-slider"
+                                                                min={0}
+                                                                max={ACTIVITY_OPTIONS.length - 1}
+                                                                step={1}
+                                                                value={[activitySliderValue]}
+                                                                onValueChange={handleActivitySliderChange}
+                                                                className={cn("w-[95%] mx-auto pt-2")}
+                                                                disabled={isSubmitting}
+                                                                aria-label="Select Activity"
+                                                            />
                                                         </FormControl>
+                                                        <div className="flex justify-between text-xs text-muted-foreground px-2">
+                                                            {ACTIVITY_OPTIONS.map((opt, index) => (
+                                                                <span key={opt.value} className={cn(index === activitySliderValue && "font-bold text-primary")}>
+                                                                    {opt.label}
+                                                                </span>
+                                                            ))}
+                                                        </div>
+                                                        <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
+                                                            {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
+                                                        </p>
                                                         {form.watch('activity') === 'other' && (
                                                              <FormField
                                                                 control={form.control}
@@ -828,23 +824,21 @@ export default function MyTravelsPage() {
                                                          <FormItem className="pt-4 space-y-3">
                                                              <FormLabel className="text-center block text-sm text-muted-foreground">Or select approximate duration</FormLabel>
                                                              <FormControl>
-                                                                <>
-                                                                    <Slider
-                                                                        id="duration-slider"
-                                                                        min={1}
-                                                                        max={MAX_DURATION_DAYS}
-                                                                        step={1}
-                                                                        value={durationSliderValue}
-                                                                        onValueChange={handleDurationSliderChange}
-                                                                        className={cn("w-[95%] mx-auto")}
-                                                                        disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))}
-                                                                        aria-label="Select Duration in Days"
-                                                                    />
-                                                                    <p className="text-center text-lg font-medium mt-2">
-                                                                        {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
-                                                                    </p>
-                                                                </>
+                                                                <Slider
+                                                                    id="duration-slider"
+                                                                    min={1}
+                                                                    max={MAX_DURATION_DAYS}
+                                                                    step={1}
+                                                                    value={durationSliderValue}
+                                                                    onValueChange={handleDurationSliderChange}
+                                                                    className={cn("w-[95%] mx-auto")}
+                                                                    disabled={isSubmitting || (!!form.watch('startDate') && !!form.watch('endDate'))}
+                                                                    aria-label="Select Duration in Days"
+                                                                />
                                                             </FormControl>
+                                                            <p className="text-center text-lg font-medium mt-2">
+                                                                {durationSliderValue[0]} day{durationSliderValue[0] !== 1 ? 's' : ''}
+                                                            </p>
                                                             <FormMessage />
                                                         </FormItem>
                                                     )}
@@ -1034,5 +1028,3 @@ export default function MyTravelsPage() {
     </div>
   );
 }
-
-            
