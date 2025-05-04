@@ -71,4 +71,3 @@ export function DateRangePicker({
     </div>
   )
 }
-```
