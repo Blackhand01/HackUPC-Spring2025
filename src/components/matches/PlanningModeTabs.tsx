@@ -1,7 +1,7 @@
 // src/components/matches/PlanningModeTabs.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
 import { UseFormReturn } from 'react-hook-form';
 import { FormField, FormItem, FormLabel, FormControl } from '@/components/ui/form';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -9,11 +9,12 @@ import { SlidersHorizontal, Wand2 } from 'lucide-react';
 import { GuidedMode } from './GuidedMode';
 import { AiChatMode } from './AiChatMode';
 import { type TravelFormValues } from '@/hooks/matches/useTravelForm';
+import { MOOD_OPTIONS, ACTIVITY_OPTIONS } from '@/config/matches'; // Import constants
 
 interface PlanningModeTabsProps {
   form: UseFormReturn<TravelFormValues>;
   isSubmitting: boolean;
-   onPreferencesExtracted: (prefs: string[]) => void; // Callback to pass extracted prefs up
+   onPreferencesExtracted: (prefs: string[]) => void; // Callback specifically for AI extracted prefs
 }
 
 export function PlanningModeTabs({ form, isSubmitting, onPreferencesExtracted }: PlanningModeTabsProps) {
@@ -28,6 +29,21 @@ export function PlanningModeTabs({ form, isSubmitting, onPreferencesExtracted }:
         const index = ACTIVITY_OPTIONS.findIndex(opt => opt.value === initialActivity);
         return index >= 0 ? index : 0;
    });
+
+   // Reset slider values if form values change externally (e.g., by AI)
+   useEffect(() => {
+        const subscription = form.watch((value, { name }) => {
+            if (name === 'mood') {
+                const index = MOOD_OPTIONS.findIndex(opt => opt.value === value.mood);
+                setMoodSliderValue(index >= 0 ? index : 0);
+            }
+            if (name === 'activity') {
+                 const index = ACTIVITY_OPTIONS.findIndex(opt => opt.value === value.activity);
+                 setActivitySliderValue(index >= 0 ? index : 0);
+            }
+        });
+        return () => subscription.unsubscribe();
+   }, [form]);
 
 
   return (
@@ -65,9 +81,9 @@ export function PlanningModeTabs({ form, isSubmitting, onPreferencesExtracted }:
                  <AiChatMode
                      form={form}
                      isSubmitting={isSubmitting}
-                     setMoodSliderValue={setMoodSliderValue} // Pass slider setters
+                     setMoodSliderValue={setMoodSliderValue} // Pass slider setters to potentially update guided view
                      setActivitySliderValue={setActivitySliderValue}
-                     onPreferencesExtracted={onPreferencesExtracted} // Pass callback
+                     onPreferencesExtracted={onPreferencesExtracted} // Pass callback only here
                  />
               </TabsContent>
             </Tabs>
@@ -77,7 +93,4 @@ export function PlanningModeTabs({ form, isSubmitting, onPreferencesExtracted }:
     />
   );
 }
-
-// Need to import or define MOOD_OPTIONS and ACTIVITY_OPTIONS if not globally available
-// For simplicity assuming they are available in this scope or imported
-import { MOOD_OPTIONS, ACTIVITY_OPTIONS } from '@/config/matches';
+```

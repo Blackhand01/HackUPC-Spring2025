@@ -37,7 +37,8 @@ export function CreateTravelDialog({
 }: CreateTravelDialogProps) {
   const form = useTravelForm();
   const [isSubmitting, setIsSubmitting] = useState(false);
-   const [extractedPreferences, setExtractedPreferences] = useState<string[]>([]);
+   // State to hold preferences extracted *specifically* from AI mode
+   const [aiExtractedPreferences, setAiExtractedPreferences] = useState<string[]>([]);
 
    // Watch form values needed for button logic and preference extraction
    const watchedValues = useWatch({ control: form.control });
@@ -45,10 +46,11 @@ export function CreateTravelDialog({
    const tripType = watchedValues.tripType;
    const departureCity = watchedValues.departureCity;
    const groupId = watchedValues.groupId;
-   const mood = watchedValues.mood;
-   const activity = watchedValues.activity;
-   const activityOther = watchedValues.activityOther;
-   const aiHasChatHistory = watchedValues.planningMode === 'ai' && extractedPreferences.length > 0; // Approximation, improve if needed
+   const mood = watchedValues.mood; // For Guided mode check
+   const activity = watchedValues.activity; // For Guided mode check
+   const activityOther = watchedValues.activityOther; // For Guided mode check
+   const tripDateStart = watchedValues.tripDateStart; // Watch dates
+   const tripDateEnd = watchedValues.tripDateEnd; // Watch dates
 
     // --- Determine if Save button should be enabled ---
     const checkCanSave = useCallback((): boolean => {
@@ -57,24 +59,28 @@ export function CreateTravelDialog({
             return false;
         }
 
+        // Need either dates or duration (if duration field exists)
+        // Currently only dates: Check if both dates are present
+         if (!tripDateStart || !tripDateEnd) {
+             return false;
+         }
+
+
         // Preference check based on mode
         if (planningMode === 'guided') {
             const isActivityValid = activity === 'other' ? !!activityOther?.trim() : !!activity;
             return !!mood || isActivityValid;
         } else if (planningMode === 'ai') {
             // For AI mode, check if preferences have been extracted (use state)
-             // Check if mood or activity has been set (likely by AI interaction)
-            const hasMood = !!form.getValues('mood');
-            const hasValidActivity = form.getValues('activity') === 'other' ? !!form.getValues('activityOther')?.trim() : !!form.getValues('activity');
-            return hasMood || hasValidActivity;
+            return aiExtractedPreferences.length > 0;
         }
         return false; // Should not happen
-    }, [departureCity, tripType, groupId, planningMode, mood, activity, activityOther, form]);
+    }, [departureCity, tripType, groupId, planningMode, mood, activity, activityOther, tripDateStart, tripDateEnd, aiExtractedPreferences]);
 
     const canSave = checkCanSave();
 
-   // Function to extract preferences based on current form state
-   const extractCurrentPreferences = useCallback(() => {
+   // Function to extract preferences based on current form state *for Guided Mode*
+   const extractGuidedPreferences = useCallback(() => {
        const prefs: string[] = [];
        const currentMood = form.getValues('mood');
        const currentActivity = form.getValues('activity');
@@ -88,32 +94,42 @@ export function CreateTravelDialog({
        } else if (currentActivity && currentActivity !== 'other') {
            prefs.push(`activity:${currentActivity}`);
        }
-       console.log("Extracting Preferences on Submit:", prefs); // Debug log
+       console.log("Extracting Guided Preferences on Submit:", prefs); // Debug log
        return prefs;
    }, [form]);
 
 
   const handleFormSubmit = async (data: TravelFormValues) => {
       setIsSubmitting(true);
-      const currentPrefs = extractCurrentPreferences();
 
+      // Determine which preferences to use based on the mode
+      const currentPrefs = planningMode === 'ai' ? aiExtractedPreferences : extractGuidedPreferences();
+
+       // Validate preferences again right before saving
        if (currentPrefs.length === 0) {
-           onSaveError(new Error('Please set mood/activity preferences before saving.'));
+           onSaveError(new Error(`Please set mood/activity preferences using the ${planningMode === 'ai' ? 'AI Assistant' : 'Guided sliders'}.`));
            setIsSubmitting(false);
            return;
        }
+        // Validate dates again
+        if (!data.tripDateStart || !data.tripDateEnd) {
+           onSaveError(new Error('Please select both a start and end date.'));
+           setIsSubmitting(false);
+           return;
+        }
+
 
        console.log("Submitting with preferences:", currentPrefs); // Debug log
 
       try {
-          const savedTravel = await onSave(data, currentPrefs);
+          const savedTravel = await onSave(data, currentPrefs); // Pass form data and the correct preferences
            if (savedTravel.groupId) {
              onSaveGroupSuccess(savedTravel);
            } else {
              onSaveSuccess(savedTravel);
            }
           form.reset(); // Reset form on successful save
-          setExtractedPreferences([]); // Clear extracted prefs
+          setAiExtractedPreferences([]); // Clear extracted AI prefs
       } catch (error) {
           onSaveError(error instanceof Error ? error : new Error('An unknown error occurred'));
       } finally {
@@ -127,7 +143,7 @@ export function CreateTravelDialog({
         <DialogHeader>
           <DialogTitle className="text-2xl">Plan Your Next Adventure</DialogTitle>
           <DialogDescription>
-            Tell us about your dream trip. Select type, departure, and preferences.
+            Tell us about your dream trip. Select type, departure, dates and preferences.
           </DialogDescription>
         </DialogHeader>
 
@@ -146,10 +162,11 @@ export function CreateTravelDialog({
 
             <DepartureCityInput control={form.control} disabled={isSubmitting} />
 
+             {/* PlanningModeTabs now contains GuidedMode which includes the DatePicker */}
              <PlanningModeTabs
                form={form}
                isSubmitting={isSubmitting}
-               onPreferencesExtracted={setExtractedPreferences} // Pass callback to update state
+               onPreferencesExtracted={setAiExtractedPreferences} // Pass callback to update AI prefs state
              />
 
 
@@ -169,3 +186,4 @@ export function CreateTravelDialog({
     </Dialog>
   );
 }
+```

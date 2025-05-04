@@ -28,6 +28,8 @@ export interface Travel {
   departureCity: string;
   departureCityIata?: string | null; // IATA code for departure city (optional)
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
+  tripDateStart?: Timestamp | null; // Added start date
+  tripDateEnd?: Timestamp | null; // Added end date
   places?: Place[]; // Candidate or selected places
   createdAt: Timestamp;
   updatedAt?: Timestamp;
@@ -76,3 +78,4 @@ export interface ChatMessage {
 }
 
 // --- You can add more shared types here as needed ---
+```

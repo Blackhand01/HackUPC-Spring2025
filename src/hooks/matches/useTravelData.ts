@@ -23,7 +23,12 @@ export function useTravelData() {
       setLoadingTravels(true);
       try {
         const travelsCollection = collection(db, 'travels');
-        const q = query(travelsCollection, where('userId', '==', user.uid), where('groupId', '==', null));
+        // Query for travels where userId matches and groupId is explicitly null
+        const q = query(
+          travelsCollection,
+          where('userId', '==', user.uid),
+          where('groupId', '==', null)
+        );
         const querySnapshot = await getDocs(q);
         const travelsList = querySnapshot.docs.map(doc => ({
           id: doc.id,
@@ -45,6 +50,7 @@ export function useTravelData() {
     }
   }, [user, authLoading, toast]);
 
+
   // --- Fetch User's Groups ---
   const fetchMyGroups = useCallback(async () => {
     if (user?.uid) {
@@ -56,7 +62,10 @@ export function useTravelData() {
         const groupsList = querySnapshot.docs.map(doc => ({
           id: doc.id,
           groupName: doc.data().groupName || `Group ${doc.id.substring(0, 5)}`,
-          // Add other necessary Group fields if needed for selection/display
+           // Include all necessary fields from the Group type
+           createBy: doc.data().createBy,
+           createAt: doc.data().createAt,
+           users: doc.data().users,
         })) as Group[];
         setMyGroups(groupsList);
       } catch (error) {
@@ -95,18 +104,25 @@ export function useTravelData() {
       if (!user) {
           throw new Error('You must be logged in to add a travel plan.');
       }
-      if (preferences.length === 0) {
+      if (preferences.length === 0 && data.planningMode === 'guided') { // Check preferences only for guided mode initially
           throw new Error('Please set mood/activity preferences.');
       }
 
       console.log("Attempting to save travel plan with preferences:", preferences, "and data:", data);
+
+      // Convert JS Date objects to Firestore Timestamps if they exist
+      const tripDateStartTimestamp = data.tripDateStart ? Timestamp.fromDate(data.tripDateStart) : null;
+      const tripDateEndTimestamp = data.tripDateEnd ? Timestamp.fromDate(data.tripDateEnd) : null;
+
 
       const travelToAdd: Omit<Travel, 'id'> = {
           userId: data.tripType === 'individual' ? user.uid : null,
           groupId: data.tripType === 'group' ? data.groupId! : null,
           departureCity: data.departureCity,
           departureCityIata: data.departureCityIata || null, // Add IATA if available
-          preferences: preferences,
+          preferences: preferences, // Use the explicitly passed preferences
+          tripDateStart: tripDateStartTimestamp, // Use Timestamp or null
+          tripDateEnd: tripDateEndTimestamp, // Use Timestamp or null
           places: [], // Initialize places as empty array
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
@@ -151,3 +167,4 @@ export function useTravelData() {
     fetchMyGroups,
   };
 }
+```

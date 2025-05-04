@@ -2,14 +2,16 @@
 'use client';
 
 import * as React from 'react'; // Import React
-import { UseFormReturn } from 'react-hook-form';
+import { UseFormReturn, Controller } from 'react-hook-form';
 import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { Smile, Mountain, Film, Users, Leaf, PlaneTakeoff, Utensils, Info, Heart } from 'lucide-react'; // Import necessary icons
+import { Smile, Mountain, Film, Users, Leaf, PlaneTakeoff, Utensils, Info, Heart, CalendarDays } from 'lucide-react'; // Import necessary icons
 import { MOOD_OPTIONS, ACTIVITY_OPTIONS } from '@/config/matches'; // Import constants
 import { type TravelFormValues } from '@/hooks/matches/useTravelForm'; // Import form type
+import { DateRangePicker } from './DateRangePicker'; // Import DateRangePicker
+import type { DateRange } from 'react-day-picker'; // Import DateRange type
 
 interface GuidedModeProps {
   form: UseFormReturn<TravelFormValues>;
@@ -81,7 +83,41 @@ export function GuidedMode({
 
 
   return (
-    <>
+    <div className='space-y-6'>
+       {/* Date Range Picker */}
+       <FormField
+        control={form.control}
+        name="tripDateStart" // Use either start or end date field name for the picker control
+        render={({ field }) => ( // `field` here is primarily for error reporting, value is handled by Controller
+          <FormItem>
+            <FormLabel className="flex items-center gap-1 text-base font-semibold">
+                <CalendarDays className="h-5 w-5" /> Trip Dates
+            </FormLabel>
+            <FormControl>
+              <Controller
+                control={form.control}
+                name="tripDateStart" // We need Controller for complex inputs like date range
+                render={({ field: { onChange, value: startDate } }) => (
+                    <DateRangePicker
+                        dateRange={{ from: startDate, to: form.watch('tripDateEnd') }}
+                        onDateChange={(range) => {
+                            form.setValue('tripDateStart', range?.from, { shouldValidate: true });
+                            form.setValue('tripDateEnd', range?.to, { shouldValidate: true });
+                        }}
+                        disabled={isSubmitting}
+                        className="mt-1"
+                    />
+                 )}
+              />
+            </FormControl>
+             {/* Display validation errors for both start and end dates if they exist */}
+             <FormMessage>{form.formState.errors.tripDateStart?.message}</FormMessage>
+             <FormMessage>{form.formState.errors.tripDateEnd?.message}</FormMessage>
+          </FormItem>
+        )}
+      />
+
+
       {/* Mood Slider */}
       <FormField
         control={form.control}
@@ -175,6 +211,7 @@ export function GuidedMode({
           </FormItem>
         )}
       />
-    </>
+    </div>
   );
 }
+```
