@@ -433,14 +433,24 @@ export default function GroupsPage() {
                          ) : (
                              <div className="space-y-3">
                                 {travelsForGroup.map(travel => {
+                                     // Ensure travel.id exists before rendering the trip item
+                                     if (!travel.id) {
+                                        console.warn("Rendering travel without ID:", travel);
+                                        return null; // Skip rendering travels without IDs
+                                    }
+
                                     const mood = getPreference(travel.preferences, 'mood');
                                     const activityRaw = getPreference(travel.preferences, 'activity');
                                     const activityOther = activityRaw?.startsWith('other:') ? activityRaw.substring(6) : undefined;
                                     const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
-                                     // Safely format dates using optional chaining
-                                     const formattedStartDate = travel.dateRange?.start?.toDate ? format(travel.dateRange.start.toDate(), "PP") : null;
-                                     const formattedEndDate = travel.dateRange?.end?.toDate ? format(travel.dateRange.end.toDate(), "PP") : null;
+                                     // Safely format dates using optional chaining and typeof checks
+                                     const formattedStartDate = travel.dateRange?.start && typeof travel.dateRange.start.toDate === 'function'
+                                        ? format(travel.dateRange.start.toDate(), "PP")
+                                        : null;
+                                     const formattedEndDate = travel.dateRange?.end && typeof travel.dateRange.end.toDate === 'function'
+                                        ? format(travel.dateRange.end.toDate(), "PP")
+                                        : null;
 
 
                                     return (
@@ -449,7 +459,7 @@ export default function GroupsPage() {
                                             <div className="space-y-1 text-xs text-muted-foreground">
                                                  <p className="flex items-center gap-1">
                                                      <LocateFixed className="h-3 w-3"/>
-                                                     Departing from: <span className="font-medium text-foreground">{travel.departureCity}</span>
+                                                     Departing from: <span className="font-medium text-foreground">{travel.departureCity || 'N/A'}</span>
                                                  </p>
                                                  {(formattedStartDate && formattedEndDate) ? (
                                                     <p className="flex items-center gap-1">
@@ -503,5 +513,3 @@ export default function GroupsPage() {
     </div>
   );
 }
-
-    
