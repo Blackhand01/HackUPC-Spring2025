@@ -21,23 +21,24 @@ export interface Place {
   country: string;
 }
 
-// Travel Interface - Added status, matches, errorDetails
+// Travel Interface - Added status, matches, errorDetails, departureCityIata
 export interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
   departureCity: string;
-  departureCityIata?: string | null; // IATA code for departure city (optional but needed for matching)
+  departureCityIata: string | null; // IATA code for departure city (optional but needed for matching)
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
   tripDateStart: Timestamp; // Make required for matching
   tripDateEnd: Timestamp; // Make required for matching
   places?: Place[]; // Candidate or selected places
   status: 'pending' | 'matching' | 'matched' | 'error' | 'booked' | 'archived'; // Added status field
   matches?: EnrichedDestination[]; // Array to store matching results from AI flow
-  errorDetails?: string; // Store error message if matching fails
+  errorDetails?: string | null; // Store error message if matching fails (allow null)
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 }
+
 
 // Group Interface
 export interface Group {
@@ -57,7 +58,7 @@ export interface Property {
     city: string;
     country: string;
     coordinates?: { lat: number | null; lng: number | null };
-    nearestAirportIata?: string | null; // Added nearest airport IATA code
+    nearestAirportIata: string | null; // Added nearest airport IATA code (allow null)
   };
   description: string;
   amenities: string[];

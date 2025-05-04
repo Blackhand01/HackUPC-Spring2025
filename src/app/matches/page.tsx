@@ -14,7 +14,7 @@ import { TravelCard } from '@/components/matches/TravelCard';
 import { TooltipProvider } from '@/components/ui/tooltip'; // Ensure TooltipProvider wraps the component
 
 export default function MyTravelsPage() {
-  const { isAuthenticated, loading: authLoading } = useAuth();
+  const { user, isAuthenticated, loading: authLoading } = useAuth(); // Get user object
   const router = useRouter();
   const { toast } = useToast();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
@@ -22,16 +22,18 @@ export default function MyTravelsPage() {
   const {
     myIndividualTravels,
     myGroups,
+    allProperties, // Get all properties
     loadingTravels,
     loadingGroups,
-    loadingProperties, // Get loading state for properties
+    loadingProperties,
     saveTravelPlan,
-    triggerDestinationMatching, // Added from hook
-    fetchMyIndividualTravels, // To refresh list after adding
-  } = useTravelData(); // Use the custom hook for data logic
+    triggerDestinationMatching,
+    fetchMyIndividualTravels,
+    matchingStatus, // Get matching status from hook
+  } = useTravelData();
 
   // --- Render Logic ---
-  if (authLoading || loadingProperties) { // Show loading if auth or properties are loading
+  if (authLoading || loadingProperties) {
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
@@ -40,9 +42,7 @@ export default function MyTravelsPage() {
     );
   }
 
-  // Redirect if not authenticated after loading state is resolved
   if (!authLoading && !isAuthenticated) {
-     // Middleware should handle this, but as a fallback:
     router.push('/login');
     return (
        <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
@@ -54,7 +54,7 @@ export default function MyTravelsPage() {
 
   const handleSaveSuccess = () => {
     setIsAddDialogOpen(false);
-    fetchMyIndividualTravels(); // Refresh the list of travels
+    fetchMyIndividualTravels(); // Refresh list
      toast({
         title: 'Travel Plan Added!',
         description: `Your new travel plan has been saved.`,
@@ -67,7 +67,7 @@ export default function MyTravelsPage() {
         title: 'Group Trip Added',
         description: 'The new trip plan is now associated with the group. View it on the Groups page.',
       });
-     router.push('/groups'); // Redirect to groups page for group travels
+     router.push('/groups');
    };
 
 
@@ -81,26 +81,24 @@ export default function MyTravelsPage() {
 
 
   return (
-    <TooltipProvider> {/* Added TooltipProvider */}
+    <TooltipProvider>
       <div className="container mx-auto py-12 px-4">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold flex items-center gap-2">
             <User className="h-8 w-8 text-primary" /> My Travels
           </h1>
-          {/* --- Add New Travel Dialog Trigger --- */}
           <Button onClick={() => setIsAddDialogOpen(true)}>
             <PlusCircle className="mr-2 h-4 w-4" /> Plan New Trip
           </Button>
-           {/* --- Add New Travel Dialog Component --- */}
            <CreateTravelDialog
              isOpen={isAddDialogOpen}
              setIsOpen={setIsAddDialogOpen}
              groups={myGroups}
              loadingGroups={loadingGroups}
-             onSave={saveTravelPlan} // Pass the save function from the hook
-             onSaveSuccess={handleSaveSuccess} // Pass success handler
-             onSaveGroupSuccess={handleSaveGroupSuccess} // Pass group success handler
-             onSaveError={handleSaveError} // Pass error handler
+             onSave={saveTravelPlan}
+             onSaveSuccess={handleSaveSuccess}
+             onSaveGroupSuccess={handleSaveGroupSuccess}
+             onSaveError={handleSaveError}
            />
         </div>
 
@@ -125,13 +123,24 @@ export default function MyTravelsPage() {
           </Card>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {myIndividualTravels.map((travel) => (
-              <TravelCard
-                key={travel.id}
-                travel={travel}
-                onTriggerMatch={triggerDestinationMatching} // Pass the match function directly
-              />
-            ))}
+            {myIndividualTravels.map((travel) => {
+               // Ensure travel.id exists and is valid before rendering
+               const currentStatus = travel.id ? matchingStatus[travel.id] || 'idle' : 'idle';
+               if (!travel.id) {
+                   console.warn("Attempting to render TravelCard without a valid ID:", travel);
+                   return null; // Skip rendering if ID is missing
+               }
+              return (
+                <TravelCard
+                  key={travel.id}
+                  travel={travel}
+                  onTriggerMatch={triggerDestinationMatching}
+                  matchingStatus={currentStatus} // Pass the specific status for this travel plan
+                  allProperties={allProperties} // Pass all properties down
+                  currentUserId={user?.uid || null} // Pass current user ID
+                />
+              );
+            })}
           </div>
         )}
       </div>
