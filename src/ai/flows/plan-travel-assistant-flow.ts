@@ -114,17 +114,30 @@ const planTravelAssistantFlow = ai.defineFlow<
     outputSchema: PlanTravelAssistantOutputSchema,
   },
   async (input) => {
-    // Call the prompt with the input data
-    const {output} = await planTravelPrompt(input);
+    try { // Add try-catch around the prompt call
+      // Call the prompt with the input data
+      const {output} = await planTravelPrompt(input);
 
-    // Return the structured output from the LLM
-    // Ensure output is not null; provide a default or throw error if necessary
-     if (!output) {
-      throw new Error('AI failed to generate a response.');
+       // Explicitly check if output is null or undefined
+      if (!output) {
+          console.error('AI prompt returned null or undefined output.');
+          throw new Error('AI failed to generate a valid response structure.');
+      }
+
+      // Add validation/defaulting for critical fields if needed
+      // Ensure response text is present (caller will handle empty string)
+      // Ensure nextFollowUpCount is a number (Zod should handle this, but provide default just in case)
+      output.nextFollowUpCount = output.nextFollowUpCount ?? input.followUpCount;
+
+      // Log the extracted data for debugging
+      console.log("AI Flow Extracted Data:", output.extractedData);
+      console.log("Next Follow Up Count:", output.nextFollowUpCount);
+      return output;
+
+    } catch (error) {
+        console.error("Error within planTravelAssistantFlow during prompt call:", error);
+        // Re-throw the error to be handled by the calling function (useAiChat hook)
+        throw error instanceof Error ? error : new Error('An unknown error occurred during AI processing.');
     }
-    // Log the extracted data for debugging
-     console.log("AI Flow Extracted Data:", output.extractedData);
-     console.log("Next Follow Up Count:", output.nextFollowUpCount);
-    return output;
   }
 );

@@ -177,10 +177,13 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
 
     try {
        // Map internal ChatMessage[] to the format expected by the AI Flow
-      const flowChatHistory = chatHistory.map(m => ({
-        role: m.sender === 'user' ? 'user' : 'ai',
-        text: m.message, // Ensure 'text' property is included
-      }));
+       // Filter out any potentially malformed initial messages
+      const flowChatHistory = chatHistory
+         .filter(m => m.message && typeof m.message === 'string') // Ensure message exists and is a string
+         .map(m => ({
+              role: m.sender === 'user' ? 'user' : 'ai',
+              text: m.message, // Ensure 'text' property is included
+         }));
        // Add the latest user message to the history being sent
        flowChatHistory.push({ role: 'user', text: currentInput });
 
@@ -195,23 +198,31 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
       console.log("Received from AI:", aiOutput); // Log output from AI
 
        // Validate AI response before adding to history
-       if (!aiOutput.response || typeof aiOutput.response !== 'string' || aiOutput.response.trim() === '') {
+       if (!aiOutput || !aiOutput.response || typeof aiOutput.response !== 'string' || aiOutput.response.trim() === '') {
            console.warn("AI returned an empty or invalid response text.");
-           throw new Error("AI assistant returned an empty response.");
+            // Do not throw error, but provide a default response to the user
+            const errorChatMessage: ChatMessage = {
+                sender: 'ai',
+                message: "Sorry, I couldn't generate a proper response. Could you try phrasing that differently?",
+                timestamp: Date.now(),
+            };
+            setChatHistory(prev => [...prev, errorChatMessage]);
+            // We might not update followUpCount here, or set it to a safe value
+       } else {
+          // Valid response from AI
+          const aiMessage: ChatMessage = {
+            sender: 'ai',
+            message: aiOutput.response,
+            timestamp: Date.now(),
+          };
+          setChatHistory(prev => [...prev, aiMessage]);
+
+          // Update follow-up count based on AI response (ensure it's a number)
+          setFollowUpCount(typeof aiOutput.nextFollowUpCount === 'number' ? aiOutput.nextFollowUpCount : followUpCount);
+
+          // --- Update Form Values based on AI Output ---
+          updateFormFromAi(aiOutput.extractedData);
        }
-
-      const aiMessage: ChatMessage = {
-        sender: 'ai',
-        message: aiOutput.response,
-        timestamp: Date.now(),
-      };
-      setChatHistory(prev => [...prev, aiMessage]);
-
-       // Update follow-up count based on AI response
-       setFollowUpCount(aiOutput.nextFollowUpCount);
-
-      // --- Update Form Values based on AI Output ---
-      updateFormFromAi(aiOutput.extractedData);
 
     } catch (error) {
       console.error('Error calling AI assistant:', error);
