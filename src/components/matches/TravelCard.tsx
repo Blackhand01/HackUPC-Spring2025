@@ -66,6 +66,7 @@ const getPreferenceIcon = (key: string, value: string | undefined): React.ReactN
 // Helper to get properties in a destination city (excluding current user's)
 const getAvailableProperties = (destinationIata: string, allProps: Property[], userId: string | null): Property[] => {
     if (!userId) return []; // Cannot filter without user ID
+    // Ensure nearestAirportIata is checked correctly
     return allProps.filter(prop => prop.address.nearestAirportIata === destinationIata && prop.hostId !== userId);
 };
 
@@ -92,8 +93,9 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
     const matchError = matchingStatus === 'error';
 
    // Determine if matching can be triggered
+   // Use departureCity (name) for the check here, as IATA is added later.
    const canMatch = !!(
-       travel.departureCityIata &&
+       travel.departureCity && // Check if departure city name exists
        travel.preferences && travel.preferences.length > 0 &&
        formattedStartDate &&
        formattedEndDate &&
@@ -166,17 +168,18 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                   topMatches.length > 0 ? (
                      <div className="space-y-2">
                          {topMatches.map((match, index) => {
-                              const availableProps = getAvailableProperties(match.destinationIata, allProperties, currentUserId);
+                              // Ensure IATA is available before attempting to find properties
+                              const availableProps = match.destinationIata ? getAvailableProperties(match.destinationIata, allProperties, currentUserId) : [];
                               return (
-                                <Dialog key={`${match.destinationIata}-${index}`}>
+                                <Dialog key={`${match.destinationIata || `no-iata-${index}`}-${index}`}>
                                     <DialogTrigger asChild>
                                         <button
                                             className="w-full text-left border p-2 rounded-md hover:bg-accent/50 transition-colors text-sm block"
-                                            disabled={availableProps.length === 0} // Disable if no properties available
-                                            title={availableProps.length === 0 ? "No available properties in this destination for swapping" : `View ${availableProps.length} available properties in ${match.destinationIata}`}
+                                            disabled={availableProps.length === 0 || !match.destinationIata} // Disable if no properties or no IATA
+                                            title={!match.destinationIata ? "Destination IATA missing" : availableProps.length === 0 ? "No available properties in this destination for swapping" : `View ${availableProps.length} available properties in ${match.destinationCity} (${match.destinationIata})`}
                                         >
                                             <div className="flex justify-between items-center">
-                                                <span className="font-medium">{index + 1}. {match.destinationIata}</span>
+                                                <span className="font-medium">{index + 1}. {match.destinationCity || match.destinationIata || 'Unknown'} {match.destinationIata && `(${match.destinationIata})`}</span>
                                                 <span className="text-xs bg-primary text-primary-foreground px-1.5 py-0.5 rounded">
                                                     Score: {match.finalScore?.toFixed(2) ?? 'N/A'}
                                                 </span>
@@ -187,7 +190,7 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                                                 <span>{match.stops ?? '?'} stops</span>
                                                 {match.durationMinutes && <span>~{(match.durationMinutes / 60).toFixed(1)}h</span>}
                                             </div>
-                                             {availableProps.length === 0 && (
+                                             {match.destinationIata && availableProps.length === 0 && (
                                                 <p className="text-xs text-amber-600 mt-1">No available properties for swap.</p>
                                              )}
                                              {match.errorMessage && <p className="text-xs text-destructive mt-1">Flight data error: {match.errorMessage}</p>}
@@ -195,7 +198,7 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                                     </DialogTrigger>
                                     <DialogContent className="sm:max-w-[800px] max-h-[80vh] overflow-y-auto">
                                         <DialogHeader>
-                                            <DialogTitle>Available Properties in {match.destinationIata}</DialogTitle>
+                                            <DialogTitle>Available Properties in {match.destinationCity} ({match.destinationIata})</DialogTitle>
                                             <DialogDescription>
                                                 Browse available properties for swapping in this destination. These exclude your own listings.
                                             </DialogDescription>
@@ -205,10 +208,6 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                                                 <PropertyCard key={prop.id} property={prop} />
                                             ))}
                                         </div>
-                                        {/* Footer can be added if needed */}
-                                        {/* <DialogFooter>
-                                            <Button variant="outline">Close</Button>
-                                        </DialogFooter> */}
                                     </DialogContent>
                                 </Dialog>
                               );
@@ -249,7 +248,7 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                  </span>
             </TooltipTrigger>
              <TooltipContent>
-                <p>{canMatch ? "Find house swap destinations based on these preferences" : isMatching ? "Matching in progress..." : "Matching requires departure IATA, preferences & dates."}</p>
+                <p>{canMatch ? "Find house swap destinations based on these preferences" : isMatching ? "Matching in progress..." : "Matching requires departure city, preferences & dates."}</p>
             </TooltipContent>
          </Tooltip>
       </CardFooter>
