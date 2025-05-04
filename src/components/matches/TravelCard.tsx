@@ -4,7 +4,7 @@
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { User, LocateFixed, Smile, Mountain, Film, Users, Leaf, Utensils, Info, Heart, Search, XCircle, Loader2, CheckCircle } from 'lucide-react'; // Added more icons
+import { User, LocateFixed, Smile, Mountain, Film, Users, Leaf, Utensils, Info, Heart, Search, XCircle, Loader2, CheckCircle, PlaneTakeoff } from 'lucide-react'; // Added PlaneTakeoff
 import { format } from 'date-fns';
 import { type Travel } from '@/types';
 
@@ -42,8 +42,7 @@ const getPreferenceIcon = (key: string, value: string | undefined): React.ReactN
         switch (value) {
             case 'hiking': return <Mountain className="h-4 w-4 text-primary"/>;
             case 'museums': return <Film className="h-4 w-4 text-primary"/>;
-            // case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>; // Placeholder
-            case 'beach': return <span title="Beach" className="text-xl">🏖️</span>; // Emoji example
+            case 'beach': return <PlaneTakeoff className="h-4 w-4 text-primary"/>; // Using PlaneTakeoff for beach
             case 'nightlife': return <Users className="h-4 w-4 text-primary"/>;
             case 'foodie': return <Utensils className="h-4 w-4 text-primary"/>;
              case 'other': return <Info className="h-4 w-4 text-primary"/>;
@@ -71,7 +70,7 @@ export function TravelCard({ travel, onTriggerMatch }: TravelCardProps) {
 
    // Determine if matching can be triggered (example condition)
    // Requires departure IATA and preferences. Dates/Duration might be needed too.
-   const canMatch = !!(travel.departureCity && travel.preferences && travel.preferences.length > 0); // Simplified condition
+   const canMatch = !!(travel.departureCity && travel.preferences && travel.preferences.length > 0 && travel.departureCityIata); // Matching now requires IATA code
 
 
   return (
@@ -158,7 +157,7 @@ export function TravelCard({ travel, onTriggerMatch }: TravelCardProps) {
                  </span>
             </TooltipTrigger>
              <TooltipContent>
-                <p>{canMatch ? "Find house swap destinations based on these preferences" : "Matching requires departure city & preferences."}</p>
+                <p>{canMatch ? "Find house swap destinations based on these preferences" : "Matching requires departure city with IATA code & preferences."}</p>
             </TooltipContent>
          </Tooltip>
       </CardFooter>

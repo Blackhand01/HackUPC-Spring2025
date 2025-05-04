@@ -1,12 +1,13 @@
 // src/components/matches/GuidedMode.tsx
 'use client';
 
+import * as React from 'react'; // Import React
 import { UseFormReturn } from 'react-hook-form';
 import { FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import { Slider } from '@/components/ui/slider';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-import { Smile, Mountain } from 'lucide-react'; // Import necessary icons
+import { Smile, Mountain, Film, Users, Leaf, PlaneTakeoff, Utensils, Info, Heart } from 'lucide-react'; // Import necessary icons
 import { MOOD_OPTIONS, ACTIVITY_OPTIONS } from '@/config/matches'; // Import constants
 import { type TravelFormValues } from '@/hooks/matches/useTravelForm'; // Import form type
 
@@ -18,6 +19,35 @@ interface GuidedModeProps {
   setMoodSliderValue: (value: number) => void;
   setActivitySliderValue: (value: number) => void;
 }
+
+// Helper function to get the correct icon based on the value
+const getIconForValue = (type: 'mood' | 'activity', value: string | undefined): React.ReactNode => {
+  if (!value) return null;
+
+  if (type === 'mood') {
+    switch (value) {
+      case 'relaxed': return <Smile className="h-4 w-4" />;
+      case 'adventurous': return <Mountain className="h-4 w-4" />;
+      case 'cultural': return <Film className="h-4 w-4" />;
+      case 'social': return <Users className="h-4 w-4" />;
+      case 'nature': return <Leaf className="h-4 w-4" />;
+      default: return <Heart className="h-4 w-4" />;
+    }
+  } else if (type === 'activity') {
+    if (value.startsWith('other:')) return <Info className="h-4 w-4" />;
+    switch (value) {
+      case 'hiking': return <Mountain className="h-4 w-4" />;
+      case 'museums': return <Film className="h-4 w-4" />;
+      case 'beach': return <PlaneTakeoff className="h-4 w-4" />; // Using PlaneTakeoff as placeholder
+      case 'nightlife': return <Users className="h-4 w-4" />;
+      case 'foodie': return <Utensils className="h-4 w-4" />;
+      case 'other': return <Info className="h-4 w-4" />;
+      default: return <Heart className="h-4 w-4" />;
+    }
+  }
+  return null;
+};
+
 
 export function GuidedMode({
   form,
@@ -45,6 +75,9 @@ export function GuidedMode({
       form.setValue('activityOther', '', { shouldValidate: true });
     }
   };
+
+  const selectedMoodValue = MOOD_OPTIONS[moodSliderValue]?.value;
+  const selectedActivityValue = ACTIVITY_OPTIONS[activitySliderValue]?.value;
 
 
   return (
@@ -79,7 +112,7 @@ export function GuidedMode({
               ))}
             </div>
             <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
-              {MOOD_OPTIONS[moodSliderValue]?.icon} {MOOD_OPTIONS[moodSliderValue]?.label}
+              {getIconForValue('mood', selectedMoodValue)} {MOOD_OPTIONS[moodSliderValue]?.label}
             </p>
             <FormMessage />
           </FormItem>
@@ -116,7 +149,7 @@ export function GuidedMode({
               ))}
             </div>
             <p className="text-center text-lg font-medium mt-2 flex items-center justify-center gap-1">
-              {ACTIVITY_OPTIONS[activitySliderValue]?.icon} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
+              {getIconForValue('activity', selectedActivityValue)} {ACTIVITY_OPTIONS[activitySliderValue]?.label}
             </p>
             {/* Conditional Input for "Other" Activity */}
             {form.watch('activity') === 'other' && (
