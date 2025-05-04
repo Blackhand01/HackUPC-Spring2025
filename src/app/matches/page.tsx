@@ -1,7 +1,7 @@
 // src/app/matches/page.tsx
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react'; // Added useEffect
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation'; // Import useRouter
 import { Button } from '@/components/ui/button';
@@ -147,7 +147,7 @@ export default function MyTravelsPage() {
                   key={travel.id}
                   travel={travel}
                   // Removed onTriggerMatch and matchingStatus props
-                  allProperties={allProperties}
+                  allProperties={allProperties} // Pass allProperties
                   currentUserId={user?.uid || null}
                 />
               );
@@ -158,4 +158,3 @@ export default function MyTravelsPage() {
     </TooltipProvider>
   );
 }
-

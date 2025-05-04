@@ -63,7 +63,10 @@ const getPreferenceIcon = (key: string, value: string | undefined): React.ReactN
 // Helper to get properties in a destination city (same as before)
 const getAvailableProperties = (destinationIata: string, allProps: Property[], userId: string | null): Property[] => {
     if (!userId) return [];
-    return allProps.filter(prop => prop.address.nearestAirportIata === destinationIata && prop.hostId !== userId);
+    // Ensure property address and nearestAirportIata exist before filtering
+    return allProps.filter(prop =>
+        prop.address?.nearestAirportIata === destinationIata && prop.hostId !== userId
+    );
 };
 
 
@@ -90,7 +93,8 @@ export function TravelCard({ travel, allProperties, currentUserId }: TravelCardP
     const isMatched = travel.status === 'matched';
     const isError = travel.status === 'error';
 
-    const topMatches = travel.matches?.slice(0, 10) || []; // Get top 10 matches
+    // Safely get matches only if status is matched
+    const topMatches = isMatched && Array.isArray(travel.matches) ? travel.matches.slice(0, 10) : [];
 
   return (
     <Card key={travel.id} className="shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col">
@@ -105,6 +109,7 @@ export function TravelCard({ travel, allProperties, currentUserId }: TravelCardP
          <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
             <LocateFixed className="h-4 w-4"/>
             Departing from: <span className="font-medium text-foreground">{travel.departureCity || 'N/A'}</span>
+            {/* Display IATA only if it exists */}
             {travel.departureCityIata && <span className="text-xs bg-muted px-1 py-0.5 rounded">({travel.departureCityIata})</span>}
          </p>
          {formattedStartDate && formattedEndDate && (
@@ -138,7 +143,7 @@ export function TravelCard({ travel, allProperties, currentUserId }: TravelCardP
                     </div>
                  </div>
              )}
-             {(!mood && !activity && travel.preferences?.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length === 0) && (
+             {(!mood && !activity && (!travel.preferences || travel.preferences?.filter(p => !p.startsWith('mood:') && !p.startsWith('activity:')).length === 0)) && (
                 <p className="text-sm text-muted-foreground italic">No specific preferences set.</p>
             )}
         </div>
@@ -159,13 +164,16 @@ export function TravelCard({ travel, allProperties, currentUserId }: TravelCardP
                   topMatches.length > 0 ? (
                      <div className="space-y-2">
                          {topMatches.map((match, index) => {
-                              const availableProps = match.destinationIata ? getAvailableProperties(match.destinationIata, allProperties, currentUserId) : [];
+                              // Ensure destinationIata exists before trying to find properties
+                              const availableProps = match.destinationIata
+                                 ? getAvailableProperties(match.destinationIata, allProperties, currentUserId)
+                                 : [];
                               return (
                                 <Dialog key={`${match.destinationIata || `no-iata-${index}`}-${index}`}>
                                     <DialogTrigger asChild>
                                         <button
                                             className="w-full text-left border p-2 rounded-md hover:bg-accent/50 transition-colors text-sm block disabled:opacity-50 disabled:cursor-not-allowed"
-                                            disabled={availableProps.length === 0 || !match.destinationIata}
+                                            disabled={!match.destinationIata || availableProps.length === 0}
                                             title={!match.destinationIata ? "Destination IATA missing" : availableProps.length === 0 ? "No available properties in this destination for swapping" : `View ${availableProps.length} available properties in ${match.destinationCity} (${match.destinationIata})`}
                                         >
                                             <div className="flex justify-between items-center">
@@ -183,12 +191,15 @@ export function TravelCard({ travel, allProperties, currentUserId }: TravelCardP
                                              {match.destinationIata && availableProps.length === 0 && (
                                                 <p className="text-xs text-amber-600 mt-1">No available properties for swap.</p>
                                              )}
+                                              {!match.destinationIata && (
+                                                 <p className="text-xs text-destructive mt-1">Destination IATA missing.</p>
+                                              )}
                                              {match.errorMessage && <p className="text-xs text-destructive mt-1">Flight data error: {match.errorMessage}</p>}
                                         </button>
                                     </DialogTrigger>
                                     <DialogContent className="sm:max-w-[800px] max-h-[80vh] overflow-y-auto">
                                         <DialogHeader>
-                                            <DialogTitle>Available Properties in {match.destinationCity} ({match.destinationIata})</DialogTitle>
+                                            <DialogTitle>Available Properties in {match.destinationCity} {match.destinationIata ? `(${match.destinationIata})` : ''}</DialogTitle>
                                             <DialogDescription>
                                                 Browse available properties for swapping in this destination. These exclude your own listings.
                                             </DialogDescription>
@@ -197,7 +208,7 @@ export function TravelCard({ travel, allProperties, currentUserId }: TravelCardP
                                             {availableProps.map(prop => (
                                                 <PropertyCard key={prop.id} property={prop} />
                                             ))}
-                                             {availableProps.length === 0 && (
+                                             {availableProps.length === 0 && match.destinationIata && ( // Only show if IATA exists but props are empty
                                                 <p className="text-muted-foreground col-span-full text-center py-4">No properties available for swap found in this location.</p>
                                             )}
                                         </div>
