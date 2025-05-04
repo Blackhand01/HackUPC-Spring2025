@@ -176,8 +176,16 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
     setIsAiLoading(true);
 
     try {
+       // Map internal ChatMessage[] to the format expected by the AI Flow
+      const flowChatHistory = chatHistory.map(m => ({
+        role: m.sender === 'user' ? 'user' : 'ai',
+        text: m.message, // Ensure 'text' property is included
+      }));
+       // Add the latest user message to the history being sent
+       flowChatHistory.push({ role: 'user', text: currentInput });
+
       const aiInput: PlanTravelAssistantInput = {
-        currentChat: [...chatHistory, {role: 'user', text: currentInput}].map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })), // Include latest message in history for context
+        currentChat: flowChatHistory, // Send the mapped history
         userPrompt: currentInput, // Pass the latest message explicitly
         followUpCount: followUpCount, // Pass current follow-up count
       };
@@ -185,6 +193,12 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
 
       const aiOutput: PlanTravelAssistantOutput = await planTravelAssistant(aiInput);
       console.log("Received from AI:", aiOutput); // Log output from AI
+
+       // Validate AI response before adding to history
+       if (!aiOutput.response || typeof aiOutput.response !== 'string' || aiOutput.response.trim() === '') {
+           console.warn("AI returned an empty or invalid response text.");
+           throw new Error("AI assistant returned an empty response.");
+       }
 
       const aiMessage: ChatMessage = {
         sender: 'ai',
