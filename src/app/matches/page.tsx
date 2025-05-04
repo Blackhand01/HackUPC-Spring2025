@@ -14,12 +14,9 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle, Timer } from 'lucide-react'; // Added Timer icon
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle, Timer } from 'lucide-react'; // Removed Timer icon
 import { useToast } from '@/hooks/use-toast';
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { Calendar as CalendarIcon } from "lucide-react";
-import { Calendar as ShadCalendar } from "@/components/ui/calendar";
-import { format } from "date-fns";
+// Removed date-related imports: Popover, CalendarIcon, ShadCalendar, format
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
@@ -28,7 +25,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from '@/components/ui/textarea';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow';
-import { findDestinationMatches, type FindDestinationMatchesInput, type FindDestinationMatchesOutput, type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow'; // Import destination matching flow
+// Removed findDestinationMatches import as matching is disabled
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import { type Travel, type Group, type Place } from '@/types'; // Import shared types
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Added Tooltip
@@ -49,13 +46,11 @@ const ACTIVITY_OPTIONS = [
     { value: "foodie", label: "Foodie", icon: <Utensils className="h-4 w-4" /> },
     { value: "other", label: "Other...", icon: <Info className="h-4 w-4" /> },
 ];
-const MAX_DURATION_DAYS = 90; // Increased max duration
-
-// Example candidate destinations (replace with dynamic logic later if needed)
-const CANDIDATE_DESTINATIONS_EUROPE = ["BCN", "LIS", "DBV", "RAK", "VLC", "ATH", "NAP", "FCO", "PMI", "AGP"];
+// Removed MAX_DURATION_DAYS
+// Removed CANDIDATE_DESTINATIONS_EUROPE
 
 
-// Define Zod schema for the new travel form validation
+// Define Zod schema for the new travel form validation - Simplified (No Dates/Duration)
 const travelFormSchema = z.object({
   tripType: z.enum(['individual', 'group'], { required_error: "Please select a trip type."}),
   groupId: z.string().optional(), // Required if tripType is 'group'
@@ -68,11 +63,6 @@ const travelFormSchema = z.object({
   // Mode 2: AI
   aiPrompt: z.string().optional(),
   planningMode: z.enum(['guided', 'ai']).default('guided'),
-  // Date/Duration Selection
-  dateInputMode: z.enum(['dates', 'duration']).default('dates'),
-  startDate: z.date().optional().nullable(),
-  endDate: z.date().optional().nullable(),
-  durationDays: z.coerce.number().int().min(1, "Duration must be at least 1 day.").max(MAX_DURATION_DAYS).optional().nullable(),
 }).refine(data => {
     if (data.tripType === 'group') return !!data.groupId;
     return true;
@@ -82,18 +72,16 @@ const travelFormSchema = z.object({
     return true;
 }, { message: "Please specify the 'other' activity.", path: ["activityOther"]})
 .refine(data => {
-    // Require dates OR duration based on mode
-    if (data.dateInputMode === 'dates') return !!data.startDate && !!data.endDate;
-    if (data.dateInputMode === 'duration') return !!data.durationDays;
-    return false; // Should not happen if mode is set and has default
-}, {
-    // Updated message to be more specific
-    message: "Please select both start/end dates or specify a trip duration.",
-    // Apply error based on the mode that failed
-    path: ["startDate"], // Can apply to either, startDate is fine
-});
-// Removed the second refine for durationDays as the main refine covers it.
-
+    // Ensure at least one preference is set if using guided mode
+    if (data.planningMode === 'guided') {
+        return !!data.mood || !!data.activity;
+    }
+    // Ensure AI prompt is set if using AI mode (initial check, might be refined later)
+    if (data.planningMode === 'ai') {
+        return !!data.aiPrompt?.trim(); // Check if AI prompt has content (or rely on chat history)
+    }
+    return false; // Should not happen
+}, { message: "Please specify mood/activity (Guided) or chat with the AI.", path: ["mood"] }); // Attach error to a common field
 
 type TravelFormValues = z.infer<typeof travelFormSchema>;
 
@@ -114,12 +102,11 @@ export default function MyTravelsPage() {
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [processingMatchId, setProcessingMatchId] = useState<string | null>(null); // Track which travel ID is being matched
+  // Removed processingMatchId state
 
   // State for Mode 1 (Sliders)
   const [moodSliderValue, setMoodSliderValue] = useState(0);
   const [activitySliderValue, setActivitySliderValue] = useState(0);
-  // Duration slider is removed, using input field instead
 
   // State for Mode 2 (AI Chat)
   const [chatHistory, setChatHistory] = useState<ChatMessage[]>([]);
@@ -137,20 +124,17 @@ export default function MyTravelsPage() {
       mood: MOOD_OPTIONS[0].value,
       activity: ACTIVITY_OPTIONS[0].value,
       activityOther: '',
-      startDate: null,
-      endDate: null,
-      durationDays: 5, // Default duration if mode is switched
-      aiPrompt: '',
+      aiPrompt: '', // Initialize AI prompt field
       planningMode: 'guided',
-      dateInputMode: 'dates', // Default to date selection
+      // Removed date/duration defaults
     },
     mode: 'onChange', // Validate on change for better feedback
   });
 
-   // Watch the date input mode to conditionally render/disable fields
-   const dateInputMode = useWatch({ control: form.control, name: 'dateInputMode' });
    // Watch form validity
    const isFormValid = form.formState.isValid;
+   const planningMode = useWatch({ control: form.control, name: 'planningMode' });
+
 
   // --- Effect for Authentication Check ---
    useEffect(() => {
@@ -167,6 +151,7 @@ export default function MyTravelsPage() {
         try {
           const travelsCollection = collection(db, 'travels');
           // Query for individual travels (userId matches, groupId is null)
+          // Removed destinationMatchesStatus filtering as it's removed
           const q = query(travelsCollection, where('userId', '==', user.uid), where('groupId', '==', null));
           const querySnapshot = await getDocs(q);
           const travelsList = querySnapshot.docs.map(doc => ({
@@ -221,93 +206,17 @@ export default function MyTravelsPage() {
   }, [user, isAuthenticated, authLoading, fetchMyIndividualTravels, fetchMyGroups]);
 
 
-  // --- Function to Trigger Destination Matching ---
+  // --- Function to Trigger Destination Matching (DISABLED) ---
   const triggerDestinationMatching = useCallback(async (travelData: Travel) => {
-    // Matching now strictly requires dateRange
-    if (!travelData.id || !travelData.dateRange?.start || !travelData.dateRange?.end || !travelData.departureCity) {
-      toast({ variant: 'destructive', title: 'Matching Error', description: 'Specific dates and departure city are required to find matches.' });
-      return;
-    }
-
-    // *** Placeholder: Derive IATA from departureCity ***
-    // In a real app, use a Geocoding API or a lookup service
-    const departureIata = travelData.departureCity.substring(0,3).toUpperCase(); // VERY Basic placeholder
-     if (departureIata.length !== 3) {
-          toast({ variant: 'destructive', title: 'Matching Error', description: 'Could not determine IATA code for departure city.' });
-          return;
-     }
-    console.log(`Derived IATA for ${travelData.departureCity}: ${departureIata}`);
-    // *** End Placeholder ***
-
-
-    setProcessingMatchId(travelData.id); // Set loading state for this specific travel item
-
-    // Update Firestore status to 'processing'
-    const travelRef = doc(db, 'travels', travelData.id);
-    try {
-      await updateDoc(travelRef, {
-        destinationMatchesStatus: 'processing',
-        lastMatchedAt: Timestamp.now(),
-      });
-      // Optionally update local state immediately for better UX
-       setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatchesStatus: 'processing', lastMatchedAt: Timestamp.now() } : t));
-    } catch (error) {
-       console.error("Error updating travel status to processing:", error);
-       toast({ variant: 'destructive', title: 'Matching Error', description: 'Failed to start the matching process.' });
-       setProcessingMatchId(null);
+       toast({ variant: 'destructive', title: 'Matching Disabled', description: 'Destination matching is temporarily disabled.' });
+       // Function remains but does nothing, or you can comment out calls to it.
        return;
-    }
-
-
-    try {
-      const moodPrefs = travelData.preferences.filter(p => p.startsWith('mood:')).map(p => p.substring(5));
-      const activityPrefs = travelData.preferences.filter(p => p.startsWith('activity:')).map(p => p.substring(9)); // Adjusted index
-
-      const matchInput: FindDestinationMatchesInput = {
-        // durationDays is not used for matching when dates are present
-        moodPreferences: moodPrefs,
-        activityPreferences: activityPrefs,
-        departureCityIata: departureIata, // Use derived IATA
-        preferredStartDate: format(travelData.dateRange.start.toDate(), 'yyyy-MM-dd'),
-        preferredEndDate: format(travelData.dateRange.end.toDate(), 'yyyy-MM-dd'),
-        candidateDestinationIatas: CANDIDATE_DESTINATIONS_EUROPE, // Use predefined candidates
-      };
-
-      console.log("Calling findDestinationMatches with input:", matchInput);
-      const matchOutput: FindDestinationMatchesOutput = await findDestinationMatches(matchInput);
-      console.log("Received findDestinationMatches output:", matchOutput);
-
-      // Update Firestore with results and status 'completed'
-      await updateDoc(travelRef, {
-        destinationMatches: matchOutput.rankedDestinations,
-        destinationMatchesStatus: 'completed',
-        lastMatchedAt: Timestamp.now(),
-        destinationMatchesError: null, // Clear previous error
-      });
-       // Update local state
-       setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatches: matchOutput.rankedDestinations, destinationMatchesStatus: 'completed', destinationMatchesError: undefined, lastMatchedAt: Timestamp.now() } : t));
-
-      toast({ title: 'Matching Complete!', description: `Found potential destinations for trip #${travelData.id?.substring(0, 6)}.` });
-
-    } catch (error: any) {
-      console.error(`Error during destination matching for travel ${travelData.id}:`, error);
-      const errorMessage = error.message || "An unknown error occurred during matching.";
-       // Update Firestore with status 'error'
-        try {
-             await updateDoc(travelRef, {
-                destinationMatchesStatus: 'error',
-                destinationMatchesError: errorMessage,
-                lastMatchedAt: Timestamp.now(),
-             });
-              // Update local state
-             setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, destinationMatchesStatus: 'error', destinationMatchesError: errorMessage, lastMatchedAt: Timestamp.now() } : t));
-        } catch (updateError) {
-             console.error("Failed to update travel status to error:", updateError);
-        }
-      toast({ variant: 'destructive', title: 'Matching Failed', description: errorMessage });
-    } finally {
-      setProcessingMatchId(null); // Clear loading state for this item
-    }
+    // // Matching now strictly requires dateRange
+    // if (!travelData.id || !travelData.dateRange?.start || !travelData.dateRange?.end || !travelData.departureCity) {
+    //   toast({ variant: 'destructive', title: 'Matching Error', description: 'Specific dates and departure city are required to find matches.' });
+    //   return;
+    // }
+    // // ... rest of the matching logic (commented out or removed)
   }, [toast]); // Include dependencies
 
 
@@ -317,76 +226,93 @@ export default function MyTravelsPage() {
         toast({ variant: 'destructive', title: 'Error', description: 'You must be logged in to add a travel plan.' });
         return;
     }
-    // Validation based on dateInputMode - now handled by Zod refine
 
     setIsSubmitting(true);
-    console.log("Submitting Travel Form Data:", data); // Log form data
+    console.log("Submitting Travel Form Data (Simplified):", data); // Log form data
 
     const preferences: string[] = [];
-    if (data.mood) preferences.push(`mood:${data.mood}`);
-    if (data.activity === 'other' && data.activityOther) {
-        preferences.push(`activity:other:${data.activityOther.trim()}`);
-    } else if (data.activity && data.activity !== 'other') {
-        preferences.push(`activity:${data.activity}`);
+    // Get preferences based on the planning mode
+    if (data.planningMode === 'guided') {
+         if (data.mood) preferences.push(`mood:${data.mood}`);
+         if (data.activity === 'other' && data.activityOther) {
+             preferences.push(`activity:other:${data.activityOther.trim()}`);
+         } else if (data.activity && data.activity !== 'other') {
+             preferences.push(`activity:${data.activity}`);
+         }
+    } else if (data.planningMode === 'ai' && chatHistory.length > 0) {
+         // Extract preferences from AI chat history (logic remains the same, but ensures chat was used)
+          const lastAiMessage = chatHistory.filter(m => m.sender === 'ai').pop();
+          // This assumes the planTravelAssistant flow output includes extractedData
+          // You might need to call the flow again here to get the final extracted data,
+          // or store the extracted data alongside the chat history.
+          // For now, we'll extract from the form fields potentially populated by AI.
+          // This is a simplification and might need adjustment based on how AI data is stored.
+          if (form.getValues('mood')) preferences.push(`mood:${form.getValues('mood')}`);
+           const activity = form.getValues('activity');
+           const activityOther = form.getValues('activityOther');
+           if (activity === 'other' && activityOther) {
+               preferences.push(`activity:other:${activityOther.trim()}`);
+           } else if (activity && activity !== 'other') {
+               preferences.push(`activity:${activity}`);
+           }
+           console.log("Preferences extracted from AI mode form state:", preferences);
+    } else {
+        // Fallback or error if no preferences are found
+        console.warn("No preferences could be determined for saving.");
+         // Add preferences directly from guided mode even if AI was selected but not used?
+         if (data.mood) preferences.push(`mood:${data.mood}`);
+         if (data.activity === 'other' && data.activityOther) {
+             preferences.push(`activity:other:${data.activityOther.trim()}`);
+         } else if (data.activity && data.activity !== 'other') {
+             preferences.push(`activity:${data.activity}`);
+         }
     }
+
+     if (preferences.length === 0) {
+         toast({ variant: 'destructive', title: 'Missing Preferences', description: 'Please set mood/activity or use the AI assistant.' });
+         setIsSubmitting(false);
+         return;
+     }
+
 
     let newTravelDocId: string | null = null; // To store the ID of the newly created doc
 
     try {
-       // Prepare dateRange or durationDays based on mode
-       let dateRangeValue: { start: Timestamp; end: Timestamp } | null = null;
-       let durationValue: number | undefined = undefined;
-
-       if (data.dateInputMode === 'dates' && data.startDate && data.endDate) {
-           dateRangeValue = {
-               start: Timestamp.fromDate(data.startDate),
-               end: Timestamp.fromDate(data.endDate),
-           };
-       } else if (data.dateInputMode === 'duration' && data.durationDays) {
-           durationValue = data.durationDays;
-       }
+       // Removed dateRangeValue and durationValue logic
 
        const travelToAdd: Omit<Travel, 'id'> = {
         userId: data.tripType === 'individual' ? user.uid : null,
         groupId: data.tripType === 'group' ? data.groupId! : null,
         departureCity: data.departureCity, // Save departure city
         preferences: preferences,
-        dateRange: dateRangeValue, // Use Timestamp or null
-        durationDays: durationValue, // Use number or undefined
+        // Removed dateRange and durationDays
         places: [], // Initialize places as empty array
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(), // Set updatedAt on creation
-        // Set matching status only if dates are provided
-        destinationMatchesStatus: dateRangeValue ? 'pending' : undefined,
+        // Removed destination matching fields
       };
 
-      console.log("Data being sent to Firestore:", travelToAdd); // Log data before sending
+      console.log("Data being sent to Firestore (Simplified):", travelToAdd); // Log data before sending
 
       const docRef = await addDoc(collection(db, 'travels'), travelToAdd);
       newTravelDocId = docRef.id; // Store the new ID
 
       toast({
         title: 'Travel Plan Added!',
-        description: `Your new ${data.tripType} travel plan has been saved. ${data.tripType === 'individual' && dateRangeValue ? 'Finding matches...' : ''}`,
+        description: `Your new ${data.tripType} travel plan has been saved.`, // Removed matching notice
       });
 
       const newTravelData: Travel = {
           ...travelToAdd,
           id: newTravelDocId,
-          // Ensure these are correctly typed based on what was added
-          dateRange: travelToAdd.dateRange || undefined,
-          durationDays: travelToAdd.durationDays || undefined,
+          // Removed dateRange and durationDays ensure correct type
           createdAt: travelToAdd.createdAt,
           updatedAt: travelToAdd.updatedAt,
-          destinationMatchesStatus: travelToAdd.destinationMatchesStatus,
       };
 
        if (data.tripType === 'individual') {
             setMyIndividualTravels(prev => [...prev, newTravelData]);
-             // Trigger matching only if dates were provided
-            if (dateRangeValue) {
-                triggerDestinationMatching(newTravelData);
-            }
+            // Do not trigger matching: triggerDestinationMatching(newTravelData);
        } else {
            // For group trips, redirect to the groups page
            toast({ title: 'Group Trip Added', description: 'The new trip plan is now associated with the group.' });
@@ -403,12 +329,9 @@ export default function MyTravelsPage() {
           mood: MOOD_OPTIONS[0].value,
           activity: ACTIVITY_OPTIONS[0].value,
           activityOther: '',
-          startDate: null,
-          endDate: null,
-          durationDays: 5, // Reset durationDays
           aiPrompt: '',
           planningMode: 'guided',
-          dateInputMode: 'dates', // Reset date mode
+          // Removed date/duration reset
       });
       setMoodSliderValue(0);
       setActivitySliderValue(0);
@@ -444,29 +367,12 @@ export default function MyTravelsPage() {
         }
     };
 
-    // --- Handler for DatePicker within FormField ---
-    const handleDateChange = (date: Date | undefined, field: ControllerRenderProps<TravelFormValues, 'startDate' | 'endDate'>) => {
-        field.onChange(date); // Update RHF state
-        form.trigger(['startDate', 'endDate']); // Trigger validation
-    }
-
-     // --- Handler for Date Input Mode change ---
-     const handleDateInputModeChange = (value: 'dates' | 'duration') => {
-         form.setValue('dateInputMode', value);
-         // Clear the other mode's values when switching
-         if (value === 'dates') {
-             form.setValue('durationDays', null, { shouldValidate: true });
-         } else {
-             form.setValue('startDate', null, { shouldValidate: true });
-             form.setValue('endDate', null, { shouldValidate: true });
-         }
-         form.trigger(); // Re-validate the form
-     };
-
+    // Removed handleDateChange, handleDateInputModeChange handlers
 
      // --- AI Chat Handlers ---
     const handleAiInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setCurrentUserInput(event.target.value);
+        form.setValue('aiPrompt', event.target.value); // Update hidden aiPrompt field if needed for validation
     };
 
     const handleAiSubmit = async (event?: React.FormEvent<HTMLFormElement>) => {
@@ -484,8 +390,9 @@ export default function MyTravelsPage() {
 
         try {
             const aiInput: PlanTravelAssistantInput = {
-                currentChat: chatHistory.map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })),
-                userPrompt: userMessage.message,
+                // Pass current chat history, including the new user message implicitly via userPrompt
+                 currentChat: chatHistory.map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })),
+                 userPrompt: userMessage.message, // Pass the latest message explicitly
             };
             const aiOutput: PlanTravelAssistantOutput = await planTravelAssistant(aiInput);
 
@@ -499,7 +406,8 @@ export default function MyTravelsPage() {
             // --- Update Form Values based on AI Output ---
             console.log("AI Extracted Data:", aiOutput.extractedData);
             if (aiOutput.extractedData) {
-                 const { mood, activity, activityOther, durationDays, startDate, endDate } = aiOutput.extractedData;
+                 // Removed date/duration extraction logic
+                 const { mood, activity, activityOther } = aiOutput.extractedData;
 
                 if (mood) {
                     const moodOption = MOOD_OPTIONS.find(opt => opt.value === mood);
@@ -523,35 +431,7 @@ export default function MyTravelsPage() {
                          setActivitySliderValue(otherIndex >= 0 ? otherIndex : 0);
                      }
                 }
-                // Prioritize dates extracted by AI
-                if (startDate && endDate) {
-                    try {
-                        const start = new Date(startDate);
-                        const end = new Date(endDate);
-                        if (!isNaN(start.getTime()) && !isNaN(end.getTime()) && end >= start) {
-                            form.setValue('dateInputMode', 'dates', { shouldValidate: true });
-                            form.setValue('startDate', start, { shouldValidate: true });
-                            form.setValue('endDate', end, { shouldValidate: true });
-                            form.setValue('durationDays', null, { shouldValidate: true }); // Clear duration if dates are set
-                            toast({ title: "AI Update", description: "Dates updated. Review and save."});
-                        } else {
-                             console.error("AI returned invalid or illogical date format:", startDate, endDate);
-                             toast({ variant: 'destructive', title: "AI Date Error", description: "AI provided invalid dates. Please set manually."});
-                        }
-                    } catch (e) {
-                        console.error("Error parsing AI dates:", e);
-                         toast({ variant: 'destructive', title: "AI Date Error", description: "Could not parse dates from AI. Please set manually."});
-                    }
-                } else if (durationDays) { // Fallback to durationDays if dates are not extracted
-                    form.setValue('dateInputMode', 'duration', { shouldValidate: true });
-                    form.setValue('durationDays', durationDays, { shouldValidate: true });
-                    form.setValue('startDate', null, { shouldValidate: true });
-                    form.setValue('endDate', null, { shouldValidate: true });
-                     toast({ title: "AI Update", description: "Duration updated. Review and save."});
-                } else {
-                     // If neither dates nor duration are extracted, keep current mode and show message
-                     toast({ title: "AI Update", description: "Preferences updated. Please set dates or duration manually."});
-                }
+                 toast({ title: "AI Update", description: "Preferences updated. Review and save."});
                  form.trigger(); // Re-validate after AI updates
             }
 
@@ -649,7 +529,7 @@ export default function MyTravelsPage() {
             <DialogHeader>
               <DialogTitle className="text-2xl">Plan Your Next Adventure</DialogTitle>
               <DialogDescription>
-                Tell us about your dream trip. Is it solo or with a group? Specify dates for matching or duration for flexibility.
+                Tell us about your dream trip. Is it solo or with a group? Specify preferences and departure city.
               </DialogDescription>
             </DialogHeader>
 
@@ -743,12 +623,12 @@ export default function MyTravelsPage() {
                         name="departureCity"
                         render={({ field }) => (
                             <FormItem>
-                                <FormLabel className="text-base font-semibold flex items-center gap-1"><LocateFixed className="h-5 w-5"/>Departure City</FormLabel>
+                                <FormLabel className="text-base font-semibold flex items-center gap-1"><LocateFixed className="h-5 w-5"/>Departure City <span className='text-destructive'>*</span></FormLabel>
                                 <FormControl>
                                     <Input placeholder="e.g., Rome, London, New York" {...field} disabled={isSubmitting} />
                                 </FormControl>
                                 <FormMessage />
-                                 <p className="text-xs text-muted-foreground pt-1">Needed for destination matching.</p>
+                                 <p className="text-xs text-muted-foreground pt-1">Where will your journey begin?</p>
                             </FormItem>
                         )}
                      />
@@ -758,7 +638,7 @@ export default function MyTravelsPage() {
                         name="planningMode"
                         render={({ field }) => (
                             <FormItem className="mt-2 border-t pt-6">
-                                 <FormLabel className="text-base font-semibold mb-3 block">Trip Preferences</FormLabel>
+                                 <FormLabel className="text-base font-semibold mb-3 block">Trip Preferences <span className='text-destructive'>*</span></FormLabel>
                                 <FormControl>
                                     <Tabs value={field.value} onValueChange={field.onChange} className="w-full">
                                          <TabsList className="grid w-full grid-cols-2">
@@ -854,151 +734,13 @@ export default function MyTravelsPage() {
                                                 )}
                                             />
 
-                                             {/* Date / Duration Selection */}
-                                             <FormField
-                                                control={form.control}
-                                                name="dateInputMode"
-                                                render={({ field }) => (
-                                                    <FormItem className="space-y-3">
-                                                         <FormLabel className="text-base font-semibold">Trip Timing <span className='text-destructive'>*</span></FormLabel>
-                                                         <FormControl>
-                                                            <RadioGroup
-                                                                onValueChange={(value: 'dates' | 'duration') => handleDateInputModeChange(value)}
-                                                                value={field.value}
-                                                                className="flex gap-4"
-                                                                disabled={isSubmitting}
-                                                            >
-                                                                <FormItem className="flex-1">
-                                                                     <FormControl>
-                                                                         <RadioGroupItem value="dates" id="dates" className="sr-only" />
-                                                                     </FormControl>
-                                                                     <FormLabel htmlFor="dates" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary justify-center font-normal">
-                                                                         <CalendarDays className="h-5 w-5 mr-1" /> Select Dates
-                                                                     </FormLabel>
-                                                                </FormItem>
-                                                                 <FormItem className="flex-1">
-                                                                     <FormControl>
-                                                                         <RadioGroupItem value="duration" id="duration" className="sr-only" />
-                                                                     </FormControl>
-                                                                      <FormLabel htmlFor="duration" className="flex items-center gap-2 p-4 border rounded-md cursor-pointer hover:bg-accent/50 has-[:checked]:bg-accent has-[:checked]:border-primary justify-center font-normal">
-                                                                          <Timer className="h-5 w-5 mr-1" /> Specify Duration
-                                                                      </FormLabel>
-                                                                </FormItem>
-                                                            </RadioGroup>
-                                                         </FormControl>
-                                                          <FormMessage /> {/* For the RadioGroup itself if needed */}
+                                             {/* Date / Duration Selection REMOVED */}
 
-                                                         {/* Conditional Date Pickers */}
-                                                          <div className={cn("grid grid-cols-1 md:grid-cols-2 gap-4 px-4 pt-4", field.value !== 'dates' && 'hidden')}>
-                                                              <FormField
-                                                                    control={form.control}
-                                                                    name="startDate"
-                                                                    render={({ field: startDateField }) => (
-                                                                        <FormItem className="flex flex-col space-y-2">
-                                                                            <FormLabel>Start Date</FormLabel>
-                                                                            <Popover>
-                                                                                <PopoverTrigger asChild>
-                                                                                     <FormControl>
-                                                                                        <Button
-                                                                                            variant={"outline"}
-                                                                                            className={cn(
-                                                                                                "w-full justify-start text-left font-normal",
-                                                                                                !startDateField.value && "text-muted-foreground"
-                                                                                            )}
-                                                                                            disabled={isSubmitting || field.value !== 'dates'}
-                                                                                        >
-                                                                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                            {startDateField.value ? format(startDateField.value, "PPP") : <span>Pick a date</span>}
-                                                                                        </Button>
-                                                                                    </FormControl>
-                                                                                </PopoverTrigger>
-                                                                                 <PopoverContent className="w-auto p-0">
-                                                                                    <ShadCalendar
-                                                                                        mode="single"
-                                                                                        selected={startDateField.value ?? undefined}
-                                                                                        onSelect={(date) => handleDateChange(date, startDateField)}
-                                                                                        initialFocus
-                                                                                        disabled={(date) => date < new Date(new Date().setHours(0,0,0,0))} // Disable past dates
-                                                                                    />
-                                                                                </PopoverContent>
-                                                                            </Popover>
-                                                                            <FormMessage />
-                                                                        </FormItem>
-                                                                    )}
-                                                              />
-                                                               <FormField
-                                                                    control={form.control}
-                                                                    name="endDate"
-                                                                    render={({ field: endDateField }) => (
-                                                                        <FormItem className="flex flex-col space-y-2">
-                                                                            <FormLabel>End Date</FormLabel>
-                                                                            <Popover>
-                                                                                <PopoverTrigger asChild>
-                                                                                     <FormControl>
-                                                                                         <Button
-                                                                                            variant={"outline"}
-                                                                                            className={cn(
-                                                                                                "w-full justify-start text-left font-normal",
-                                                                                                !endDateField.value && "text-muted-foreground"
-                                                                                            )}
-                                                                                            disabled={isSubmitting || field.value !== 'dates' || !form.watch('startDate')}
-                                                                                        >
-                                                                                            <CalendarIcon className="mr-2 h-4 w-4" />
-                                                                                            {endDateField.value ? format(endDateField.value, "PPP") : <span>Pick a date</span>}
-                                                                                        </Button>
-                                                                                     </FormControl>
-                                                                                </PopoverTrigger>
-                                                                                 <PopoverContent className="w-auto p-0">
-                                                                                     <ShadCalendar
-                                                                                        mode="single"
-                                                                                        selected={endDateField.value ?? undefined}
-                                                                                        onSelect={(date) => handleDateChange(date, endDateField)}
-                                                                                        disabled={(date) => {
-                                                                                           const startDate = form.watch('startDate');
-                                                                                           return (startDate ? date < startDate : false) || date < new Date(new Date().setHours(0,0,0,0));
-                                                                                        }}
-                                                                                        initialFocus
-                                                                                    />
-                                                                                </PopoverContent>
-                                                                            </Popover>
-                                                                            <FormMessage />
-                                                                        </FormItem>
-                                                                    )}
-                                                               />
-                                                          </div>
 
-                                                          {/* Conditional Duration Input */}
-                                                          <div className={cn("px-4 pt-4", field.value !== 'duration' && 'hidden')}>
-                                                               <FormField
-                                                                    control={form.control}
-                                                                    name="durationDays"
-                                                                    render={({ field: durationField }) => (
-                                                                        <FormItem>
-                                                                            <FormLabel>Duration (days)</FormLabel>
-                                                                             <FormControl>
-                                                                                <Input
-                                                                                    type="number"
-                                                                                    min="1"
-                                                                                    max={MAX_DURATION_DAYS}
-                                                                                    placeholder="e.g., 7"
-                                                                                    {...durationField}
-                                                                                    value={durationField.value ?? ''} // Handle null/undefined for input value
-                                                                                    disabled={isSubmitting || field.value !== 'duration'}
-                                                                                />
-                                                                             </FormControl>
-                                                                            <FormMessage />
-                                                                        </FormItem>
-                                                                    )}
-                                                                />
-                                                          </div>
-                                                          {/* Display top-level form errors related to date/duration refinement */}
-                                                           {form.formState.errors.startDate && form.formState.errors.startDate.type === 'refine' && (
-                                                            <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.startDate.message}</p>
-                                                           )}
-
-                                                    </FormItem>
-                                                )}
-                                            />
+                                             {/* Display top-level form errors related to preference refinement */}
+                                              {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
+                                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
+                                              )}
 
 
                                          </TabsContent>
@@ -1030,7 +772,7 @@ export default function MyTravelsPage() {
                                                 </ScrollArea>
                                                  <div className="flex items-center gap-2">
                                                      <Textarea
-                                                         placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation for a week from Rome')"
+                                                         placeholder="Ask the AI about your trip preferences (e.g., 'I want a relaxing beach vacation from Rome')"
                                                          value={currentUserInput}
                                                          onChange={handleAiInputChange}
                                                          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleAiSubmit(); } }}
@@ -1054,10 +796,14 @@ export default function MyTravelsPage() {
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
                         {/* Button disabled state depends on form validity AND loading state */}
-                        <Button type="submit" disabled={isSubmitting || isAiLoading || !isFormValid}>
-                        {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
-                        </Button>
+                         {/* Enable save button if form is valid OR if AI mode is selected and chat has history */}
+                          <Button
+                             type="submit"
+                             disabled={isSubmitting || isAiLoading || !(isFormValid || (planningMode === 'ai' && chatHistory.length > 0 && !!form.getValues('departureCity')))}
+                           >
+                             {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                             {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
+                         </Button>
                     </DialogFooter>
                 </form>
             </Form>
@@ -1096,17 +842,15 @@ export default function MyTravelsPage() {
                 ? travel.createdAt.toDate().toLocaleDateString()
                 : 'N/A';
 
-             const formattedStartDate = travel.dateRange?.start && typeof travel.dateRange.start.toDate === 'function'
-                ? format(travel.dateRange.start.toDate(), "PPP")
-                : null;
-             const formattedEndDate = travel.dateRange?.end && typeof travel.dateRange.end.toDate === 'function'
-                ? format(travel.dateRange.end.toDate(), "PPP")
-                : null;
+             // Removed date formatting
+             // Removed matching status variables
 
-             const isMatching = processingMatchId === travel.id || travel.destinationMatchesStatus === 'processing';
-             const matchCompleted = travel.destinationMatchesStatus === 'completed';
-             const matchError = travel.destinationMatchesStatus === 'error';
-             const canMatch = !!travel.dateRange?.start && !!travel.dateRange?.end && !!travel.departureCity; // Can match only if dates and departure city are set
+             // Matching is disabled as it requires dates
+             const canMatch = false;
+             const isMatching = false;
+             const matchCompleted = false;
+             const matchError = false;
+
 
              return (
                 <Card key={travel.id} className="shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col">
@@ -1122,17 +866,7 @@ export default function MyTravelsPage() {
                         <LocateFixed className="h-4 w-4"/>
                          Departing from: <span className="font-medium text-foreground">{travel.departureCity}</span>
                     </p>
-                     {(formattedStartDate && formattedEndDate) ? (
-                        <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
-                            <Calendar className="h-4 w-4"/>
-                            {formattedStartDate} - {formattedEndDate}
-                        </p>
-                     ) : travel.durationDays ? (
-                         <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
-                            <Timer className="h-4 w-4"/>
-                            {travel.durationDays} day{travel.durationDays !== 1 ? 's' : ''} (Flexible Dates)
-                         </p>
-                     ) : null}
+                     {/* Removed date/duration display */}
                 </CardHeader>
                 <CardContent className="flex-grow space-y-2">
                     {mood && (
@@ -1157,44 +891,11 @@ export default function MyTravelsPage() {
                          </div>
                      )}
 
-                     {/* Destination Matching Section */}
+                     {/* Destination Matching Section - Disabled */}
                      <div className="pt-4 border-t mt-4">
                         <h4 className="text-sm font-semibold mb-2">Destination Matches</h4>
-                         {!canMatch ? (
-                            <p className="text-sm text-muted-foreground italic">Specify exact dates and departure city to enable matching.</p>
-                         ) : isMatching ? (
-                            <div className="flex items-center text-sm text-muted-foreground">
-                                <Loader2 className="h-4 w-4 mr-2 animate-spin" /> Searching for best destinations...
-                            </div>
-                         ) : matchError ? (
-                             <div className="flex items-center text-sm text-destructive">
-                                 <XCircle className="h-4 w-4 mr-2" /> Error: {travel.destinationMatchesError || 'Matching failed.'}
-                             </div>
-                         ) : matchCompleted && travel.destinationMatches && travel.destinationMatches.length > 0 ? (
-                            <div className="space-y-2">
-                                {travel.destinationMatches.slice(0, 3).map((match, index) => (
-                                    <div key={index} className="text-xs border p-2 rounded-md bg-background">
-                                        <div className="flex justify-between items-center mb-1">
-                                             <span className="font-semibold text-primary">{index + 1}. {match.destinationIata}</span>
-                                             <span className="font-bold text-lg">{Math.round((match.finalScore ?? 0) * 100)}%</span>
-                                        </div>
-                                        <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-muted-foreground">
-                                            <span className="flex items-center gap-1"><Euro className="h-3 w-3"/> ~€{match.priceEur ?? 'N/A'}</span>
-                                            <span className="flex items-center gap-1"><Leaf className="h-3 w-3"/> {match.co2Kg?.toFixed(1) ?? 'N/A'} kg</span>
-                                            <span className="flex items-center gap-1"><BarChart className="h-3 w-3"/> {match.stops ?? 'N/A'} stop(s)</span>
-                                            <span className="flex items-center gap-1"><Clock className="h-3 w-3"/> {match.durationMinutes ? `${Math.floor(match.durationMinutes/60)}h ${match.durationMinutes%60}m` : 'N/A'}</span>
-                                            {match.affinityScore !== undefined && <span className="flex items-center gap-1 col-span-2"><Heart className="h-3 w-3"/> Affinity: {Math.round(match.affinityScore * 100)}%</span>}
-                                        </div>
-                                        {match.errorMessage && <p className="text-destructive text-xs mt-1">{match.errorMessage}</p>}
-                                    </div>
-                                ))}
-                                {travel.destinationMatches.length > 3 && <p className="text-xs text-muted-foreground text-center mt-1">... and more</p>}
-                            </div>
-                         ) : matchCompleted && (!travel.destinationMatches || travel.destinationMatches.length === 0) ? (
-                             <p className="text-sm text-muted-foreground italic">No suitable destinations found based on criteria.</p>
-                         ) : (
-                             <p className="text-sm text-muted-foreground italic">Ready to find matches.</p>
-                         )}
+                         <p className="text-sm text-muted-foreground italic">Destination matching is currently disabled.</p>
+                         {/* Removed conditional rendering based on matching status */}
                      </div>
 
 
@@ -1210,20 +911,18 @@ export default function MyTravelsPage() {
                                 <Button
                                     variant="secondary"
                                     size="sm"
-                                    onClick={() => triggerDestinationMatching(travel)}
-                                    disabled={isMatching || !canMatch}
-                                    aria-disabled={!canMatch} // For accessibility
+                                    onClick={() => triggerDestinationMatching(travel)} // Still calls the (now disabled) function
+                                    disabled={true} // Always disabled
+                                    aria-disabled={true} // For accessibility
                                 >
-                                    {isMatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin"/> : <Search className="mr-2 h-4 w-4" />}
-                                    {isMatching ? 'Matching...' : (matchCompleted || matchError) ? 'Refresh Matches' : 'Find Matches'}
+                                    <Search className="mr-2 h-4 w-4" />
+                                    Find Matches
                                 </Button>
                              </span>
                         </TooltipTrigger>
-                         {!canMatch && (
-                             <TooltipContent>
-                                <p>Requires specific dates and departure city</p>
-                            </TooltipContent>
-                         )}
+                         <TooltipContent>
+                            <p>Destination matching requires dates (temporarily disabled)</p>
+                        </TooltipContent>
                      </Tooltip>
                     {/* <Button variant="outline" size="sm">View Details</Button> */}
                 </CardFooter>

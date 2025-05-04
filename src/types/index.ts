@@ -1,6 +1,6 @@
 // src/types/index.ts
 import { Timestamp } from 'firebase/firestore';
-import { type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow'; // Import from flow
+// Removed import for EnrichedDestination as matching is temporarily disabled
 
 // Review Interface
 export interface Review {
@@ -21,23 +21,22 @@ export interface Place {
   country: string;
 }
 
-// Travel Interface
+// Travel Interface - Simplified (No dates/duration, no matching fields)
 export interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
   departureCity: string;
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
-  dateRange?: { start: Timestamp; end: Timestamp } | null; // Make optional
-  durationDays?: number; // Make optional
   places?: Place[]; // Candidate or selected places
   createdAt: Timestamp;
   updatedAt?: Timestamp;
-  // --- Added fields for destination matching ---
-  destinationMatches?: EnrichedDestination[]; // Store ranked results from find-destination-matches-flow
-  destinationMatchesStatus?: 'pending' | 'processing' | 'completed' | 'error';
-  destinationMatchesError?: string;
-  lastMatchedAt?: Timestamp;
+  // Removed dateRange
+  // Removed durationDays
+  // Removed destinationMatches
+  // Removed destinationMatchesStatus
+  // Removed destinationMatchesError
+  // Removed lastMatchedAt
 }
 
 // Group Interface
