@@ -17,7 +17,7 @@ OnlyFly is the first AI-powered home-exchange platform that lets you travel the 
    * By integrating Skyscanner’s API, OnlyFly recommends the most affordable flights on your chosen dates.
 4. **Secure and easy payments:**
 
-   * With Revolut’s API, manage deposits, virtual cards and automated payouts directly on the platform for total peace of mind.
+   * With Revolut’s API, manage deposits, virtual cards and automated payouts directly on the platform for total peace of mind.(WIP)
 5. **Feedback and ranking:**
 
    * Leave reviews and receive ratings to build a trustworthy, vibrant community.
@@ -28,38 +28,7 @@ OnlyFly is the first AI-powered home-exchange platform that lets you travel the 
 * **System Administrator:** monitors performance metrics and oversees integrations.
 * **API Sponsors (Skyscanner, Revolut, Grafana):** require well-defined integration workflows.
 
-## 3. Sponsor Challenges
-
-### Skyscanner – Group Planning: “The Perfect Reunion”
-
-Design a travel planner that helps friends from around the world choose the ideal meeting spot. Focus on a fun, collaborative experience. Criteria may include:
-
-* **Green Travel:** optimize for lowest carbon footprint.
-* **Interests-Based Recommendations:** match art, culture, cuisine, weather or outdoor adventures.
-* **Events:** concerts, sports matches, etc.
-* **Cheapest Destination:** factor in flight and train data.
-
-### Revolut – AI-Powered Wallet & Budgeting
-
-Create an AI solution for finance: from budgeting chatbots to generative card designs. Use any AI tool (LLMs, deep-learning models), but no APIs will be provided—you must use your own. Aim for originality and a working prototype; open-source releases encouraged.
-
-### Vueling – Offline Critical Communication: “Watch Out, Blackout!”
-
-Build a minimal app for travelers to share essential flight information during blackouts. Requirements:
-
-* Peer-to-peer comms network;
-* Prioritize flight-critical data;
-* Low-battery consumption;
-* Bonus for gamification and uplifting UX.
-
-### Grafana – Sustainability Dashboard: “Green Grafana”
-
-Support the UN SDGs by leveraging Grafana for environmental insights. Two approaches (or both):
-
-1. **Data Viz Powerhouse:** ingest open data, reveal trends, craft compelling dashboards.
-2. **Grafana App Innovator:** build a plugin offering unique SDG-related insights or functions.
-
-## 4. Vision and Objectives
+## 3. Vision and Objectives
 
 * **Seamless UX:** one-click joins, intuitive interfaces.
 * **Sustainability:** display CO₂ impact and green scores.
@@ -67,7 +36,7 @@ Support the UN SDGs by leveraging Grafana for environmental insights. Two approa
 * **Operational Safety:** critical offline communication.
 * **Data-Driven:** dashboards and alerts for performance and sustainability.
 
-## 5. Key Features
+## 4. Key Features
 
 1. **Registration & Profile:** OAuth/email, identity OCR, payment account.
 2. **Travel Groups:** one-click invite links, mood/activity sliders.
@@ -78,7 +47,7 @@ Support the UN SDGs by leveraging Grafana for environmental insights. Two approa
 7. **Follow-Up & Ratings:** calendar reminders, reviews, dispute management.
 8. **Analytics & Dashboard:** host metrics, Grafana alerts, data export.
 
-## 6. Stakeholder Requirements (SR)
+## 5. Stakeholder Requirements (SR)
 
 ### **SR1. Access and Authentication**  
 - **SR1.1:** OAuth registration (Facebook/Google).  

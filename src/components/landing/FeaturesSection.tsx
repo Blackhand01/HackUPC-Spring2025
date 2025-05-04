@@ -25,7 +25,7 @@ const features = [
    {
     icon: <MessageCircle className="h-8 w-8 text-primary" />,
     title: 'Critical Communication',
-    description: 'Stay connected with multilingual chat and emergency features, even offline.',
+    description: 'Stay connected with multilingual chat.',
   },
 ];
 

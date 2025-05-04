@@ -10,7 +10,7 @@ import { type Travel, type Group, type Property } from '@/types';
 import { type TravelFormValues } from './useTravelForm';
 import { format } from 'date-fns';
 import { findDestinationMatches, type FindDestinationMatchesInput, type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow';
-import { getIataCodeForCity } from '@/lib/iataUtils'; // Use the utility function
+// Removed: import { getIataCodeForCity } from '@/lib/iataUtils'; // This causes build error as 'fs' is server-side
 
 export function useTravelData() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
@@ -21,7 +21,6 @@ export function useTravelData() {
   const [loadingTravels, setLoadingTravels] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [loadingProperties, setLoadingProperties] = useState(false);
-  // Removed matchingStatus state
 
   // --- Fetch Individual Travels ---
   const fetchMyIndividualTravels = useCallback(async () => {
@@ -41,7 +40,6 @@ export function useTravelData() {
           ...doc.data(),
         })) as Travel[];
         setMyIndividualTravels(travelsList);
-        // No need to initialize matchingStatus anymore
       } catch (error) {
         console.error('Error fetching user travels:', error);
         toast({
@@ -88,19 +86,17 @@ export function useTravelData() {
         setLoadingProperties(true);
         try {
             const propertiesCollection = collection(db, 'properties');
-            // Add nearestAirportIata to the type if needed, or handle potential missing field
             const querySnapshot = await getDocs(propertiesCollection);
             const propertiesList = querySnapshot.docs.map(doc => {
                 const data = doc.data();
                 return {
                     id: doc.id,
                     ...data,
-                    // Ensure address exists and has coordinates/nearestAirportIata if needed
                     address: {
                         city: data.address?.city || '',
                         country: data.address?.country || '',
                         coordinates: data.address?.coordinates || { lat: null, lng: null },
-                        nearestAirportIata: data.address?.nearestAirportIata || null, // Add nearestAirportIata
+                        nearestAirportIata: data.address?.nearestAirportIata || null,
                     }
                 } as Property;
             });
@@ -140,10 +136,7 @@ export function useTravelData() {
             return;
         }
 
-         // Ensure we have the latest travel data (optional, but good practice if updates happen frequently)
-         // const currentTravelDoc = await getDoc(doc(db, 'travels', travelId));
-         // const travelData = currentTravelDoc.exists() ? { id: currentTravelDoc.id, ...currentTravelDoc.data() } as Travel : savedTravel;
-         const travelData = savedTravel; // Use the data passed in for now
+         const travelData = savedTravel;
 
         // --- Validation ---
         if (!travelData.departureCity) {
@@ -167,111 +160,70 @@ export function useTravelData() {
              return;
         }
 
-        // --- Look up Departure IATA using the utility function ---
-        const departureIata = await getIataCodeForCity(travelData.departureCity);
-        if (!departureIata) {
-             toast({ variant: 'destructive', title: 'IATA Not Found', description: `Could not find IATA code for departure city: ${travelData.departureCity}.` });
-             await updateDoc(doc(db, 'travels', travelId), { status: 'error', errorDetails: `IATA not found for ${travelData.departureCity}` });
-             return;
-         }
-          console.log(`Looked up IATA: ${departureIata} for city ${travelData.departureCity}`);
-
-        // --- Prepare Candidate Destinations (from allProperties) ---
-         const cityIataMap = new Map<string, string>();
-         allProperties.forEach(prop => {
-             // Ensure prop.address and prop.address.city exist before trying to access them
-             if (prop.address?.city && prop.address?.nearestAirportIata) {
-                 const cityLower = prop.address.city.toLowerCase();
-                 if (!cityIataMap.has(cityLower)) {
-                     cityIataMap.set(cityLower, prop.address.nearestAirportIata);
-                 }
-             } else {
-                 // console.warn(`Property ${prop.id} missing city or nearestAirportIata.`);
-             }
-         });
-
-         const candidateCities = Array.from(cityIataMap.keys());
-         const candidateIatas = Array.from(cityIataMap.values());
-
-         if (candidateCities.length === 0) {
-            toast({ variant: 'destructive', title: 'No Destinations', description: 'No properties with cities/airports found.' });
-            await updateDoc(doc(db, 'travels', travelId), { status: 'error', errorDetails: 'No candidate destinations found.' });
-            return;
-         }
-         console.log(`Candidate destinations for matching (${candidateCities.length}):`, candidateCities);
-
-
         // Update status to 'matching' in Firestore
         const travelRef = doc(db, 'travels', travelId);
         try {
             await updateDoc(travelRef, {
                 status: 'matching',
-                departureCityIata: departureIata, // Save the looked-up IATA
+                // departureCityIata is no longer set here
                 errorDetails: null,
                 updatedAt: Timestamp.now(),
-                matches: [], // Clear previous matches
+                matches: [],
             });
             // Update local state immediately
-            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'matching', departureCityIata: departureIata, matches: [], errorDetails: null } : t));
+            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'matching', matches: [], errorDetails: null } : t));
             toast({ title: 'Matching Started', description: 'Finding the best destinations...' });
         } catch (error) {
              console.error("Error updating travel status to 'matching':", error);
              toast({ variant: 'destructive', title: 'Error', description: 'Could not start matching.' });
-             // Don't proceed if status update fails
              return;
         }
 
-        // --- Call AI Flow ---
+        // --- Call AI Flow (which now handles IATA lookup) ---
         try {
+            // Prepare input for the AI flow
+            // The AI flow will internally fetch properties and lookup IATA codes
             const moodPrefs = travelData.preferences.filter(p => p.startsWith('mood:')).map(p => p.substring(5));
             const activityPrefs = travelData.preferences.filter(p => p.startsWith('activity:')).map(p => p.substring(9));
             const startDateStr = format(travelData.tripDateStart.toDate(), 'yyyy-MM-dd');
             const endDateStr = format(travelData.tripDateEnd.toDate(), 'yyyy-MM-dd');
 
-            const matchingInput: FindDestinationMatchesInput = {
+            // The FindDestinationMatchesInput now expects city names and the flow handles lookup
+            const matchingInput = {
                 moodPreferences: moodPrefs,
                 activityPreferences: activityPrefs,
-                departureCityIata: departureIata,
-                departureCityName: travelData.departureCity,
+                departureCityName: travelData.departureCity, // Pass city name
                 preferredStartDate: startDateStr,
                 preferredEndDate: endDateStr,
-                candidateDestinationCities: candidateCities,
-                candidateDestinationIatas: candidateIatas,
             };
 
-            console.log("Sending data to findDestinationMatches flow:", matchingInput);
-            const result = await findDestinationMatches(matchingInput);
+            console.log("Sending data to findDestinationMatches flow (server-side IATA lookup):", matchingInput);
+            // Cast the input explicitly if needed, ensure the flow definition matches
+            const result = await findDestinationMatches(matchingInput as FindDestinationMatchesInput);
             console.log("Received matching results:", result);
 
-            // Update Firestore with results
+            // Update Firestore with results (including departure IATA potentially added by the flow)
             await updateDoc(travelRef, {
                 status: 'matched',
-                matches: result.rankedDestinations, // Store the structured results
+                matches: result.rankedDestinations,
+                 departureCityIata: result.departureCityIata, // Store the resolved departure IATA from the flow
                 updatedAt: Timestamp.now(),
             });
 
             // Update local state
-            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'matched', matches: result.rankedDestinations } : t));
+            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'matched', matches: result.rankedDestinations, departureCityIata: result.departureCityIata } : t));
             toast({ title: 'Matching Complete!', description: 'Potential destinations found.' });
-
-            // --- TODO: Navigation Logic ---
-            // Consider using router.push(`/my-travels/${travelId}/results`) or similar
-            // This might be better handled in the component calling this hook after success
-            console.log("Matching finished, results saved. Navigation needed.");
-
 
         } catch (error) {
             console.error("Error during destination matching flow:", error);
             const message = error instanceof Error ? error.message : "Unknown error during matching.";
 
-            // Update Firestore status to 'error'
             try {
                 await updateDoc(travelRef, { status: 'error', errorDetails: message, updatedAt: Timestamp.now() });
             } catch (updateError) {
                  console.error("Error updating travel status to 'error':", updateError);
             }
 
-            // Update local state
             setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'error', errorDetails: message } : t));
             toast({ variant: 'destructive', title: 'Matching Failed', description: message });
         }
@@ -279,8 +231,8 @@ export function useTravelData() {
   }, [toast, allProperties, loadingProperties, user]); // Added user dependency
 
 
-  // --- Function to Save Travel Plan (Modified) ---
-   const saveTravelPlan = useCallback(async (data: TravelFormValues, preferences: string[]): Promise<Travel | null> => { // Return Travel or null on error
+  // --- Function to Save Travel Plan ---
+   const saveTravelPlan = useCallback(async (data: TravelFormValues, preferences: string[]): Promise<Travel | null> => {
       if (!user) {
           toast({ variant: 'destructive', title: 'Auth Error', description: 'You must be logged in.' });
           return null;
@@ -306,8 +258,8 @@ export function useTravelData() {
       const travelToAdd: Omit<Travel, 'id'> = {
           userId: data.tripType === 'individual' ? user.uid : null,
           groupId: data.tripType === 'group' ? data.groupId! : null,
-          departureCity: data.departureCity.trim(), // Trim whitespace
-          departureCityIata: null, // Will be populated during matching
+          departureCity: data.departureCity.trim(),
+          departureCityIata: null, // Set to null initially, flow will handle lookup
           preferences: preferences,
           tripDateStart: tripDateStartTimestamp,
           tripDateEnd: tripDateEndTimestamp,
@@ -332,31 +284,24 @@ export function useTravelData() {
               updatedAt: travelToAdd.updatedAt,
           };
 
-           // Update local state immediately
-           if (newTravelData.userId) {
-               setMyIndividualTravels(prev => [...prev, newTravelData]);
-           } else if (newTravelData.groupId) {
-                // Optionally, trigger a refetch of group travels if needed elsewhere
-                // Or pass the new travel data back to the calling component
-           }
-
+           // Trigger matching process immediately after saving
+           // No need to update local state here first, initiateMatchingProcess will handle it
            toast({
                title: "Travel Plan Saved",
                description: "Finding the best matches for your trip...",
            });
 
-           // --- Initiate Matching Process Immediately After Saving ---
-           initiateMatchingProcess(newTravelData); // Pass the newly created travel data
+           await initiateMatchingProcess(newTravelData); // Await the matching process
 
-           return newTravelData;
+           return newTravelData; // Return the saved data (might have updated status now)
 
       } catch (error) {
           console.error('Error adding travel plan:', error);
            const message = error instanceof Error ? error.message : 'An unknown error occurred.';
            toast({ variant: 'destructive', title: 'Save Failed', description: `Failed to save your travel plan: ${message}` });
-           return null; // Indicate failure
+           return null; // Return null on error
       }
-  }, [user, toast, initiateMatchingProcess]); // Added initiateMatchingProcess
+  }, [user, toast, initiateMatchingProcess]);
 
 
   return {
@@ -367,8 +312,7 @@ export function useTravelData() {
     loadingGroups,
     loadingProperties,
     saveTravelPlan,
-    // Removed triggerDestinationMatching and matchingStatus from return
-    fetchMyIndividualTravels,
-    fetchMyGroups,
+    fetchMyIndividualTravels, // Export for potential manual refresh
+    // Removed initiateMatchingProcess from export as it's internal now
   };
 }
