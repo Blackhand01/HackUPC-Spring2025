@@ -24,24 +24,32 @@ export default function MyTravelsPage() {
     myGroups,
     loadingTravels,
     loadingGroups,
+    loadingProperties, // Get loading state for properties
     saveTravelPlan,
     triggerDestinationMatching, // Added from hook
     fetchMyIndividualTravels, // To refresh list after adding
   } = useTravelData(); // Use the custom hook for data logic
 
   // --- Render Logic ---
-  if (authLoading) {
+  if (authLoading || loadingProperties) { // Show loading if auth or properties are loading
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
+        <p className="ml-3 text-muted-foreground">Loading essential data...</p>
       </div>
     );
   }
 
   // Redirect if not authenticated after loading state is resolved
   if (!authLoading && !isAuthenticated) {
-    // router.push('/login'); // Let middleware handle redirection
-    return null; // Render nothing while redirecting
+     // Middleware should handle this, but as a fallback:
+    router.push('/login');
+    return (
+       <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
+           <Loader2 className="h-16 w-16 animate-spin text-primary" />
+           <p className="ml-3 text-muted-foreground">Redirecting to login...</p>
+       </div>
+   );
   }
 
   const handleSaveSuccess = () => {
@@ -121,7 +129,7 @@ export default function MyTravelsPage() {
               <TravelCard
                 key={travel.id}
                 travel={travel}
-                onTriggerMatch={() => triggerDestinationMatching(travel)} // Pass the match function
+                onTriggerMatch={triggerDestinationMatching} // Pass the match function directly
               />
             ))}
           </div>

@@ -6,16 +6,20 @@ import { collection, query, where, getDocs, addDoc, Timestamp, doc, getDoc, upda
 import { db } from '@/lib/firebase';
 import { useAuth } from '@/context/AuthContext';
 import { useToast } from '@/hooks/use-toast';
-import { type Travel, type Group } from '@/types';
+import { type Travel, type Group, type Property } from '@/types'; // Added Property
 import { type TravelFormValues } from './useTravelForm'; // Import form values type
+import { format } from 'date-fns'; // For date formatting
+import { findDestinationMatches, type FindDestinationMatchesInput } from '@/ai/flows/find-destination-matches-flow'; // Import the matching flow
 
 export function useTravelData() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const { toast } = useToast();
   const [myIndividualTravels, setMyIndividualTravels] = useState<Travel[]>([]);
   const [myGroups, setMyGroups] = useState<Group[]>([]);
+  const [allProperties, setAllProperties] = useState<Property[]>([]); // State for all properties
   const [loadingTravels, setLoadingTravels] = useState(true);
   const [loadingGroups, setLoadingGroups] = useState(false);
+  const [loadingProperties, setLoadingProperties] = useState(false); // Loading state for properties
 
   // --- Fetch Individual Travels ---
   const fetchMyIndividualTravels = useCallback(async () => {
@@ -27,7 +31,8 @@ export function useTravelData() {
         const q = query(
           travelsCollection,
           where('userId', '==', user.uid),
-          where('groupId', '==', null)
+          where('groupId', '==', null),
+          where('status', '!=', 'archived') // Example: Exclude archived travels
         );
         const querySnapshot = await getDocs(q);
         const travelsList = querySnapshot.docs.map(doc => ({
@@ -79,53 +84,184 @@ export function useTravelData() {
     }
   }, [user, authLoading]);
 
+    // --- Fetch All Properties ---
+    const fetchAllProperties = useCallback(async () => {
+        setLoadingProperties(true);
+        try {
+            const propertiesCollection = collection(db, 'properties');
+            const querySnapshot = await getDocs(propertiesCollection);
+            const propertiesList = querySnapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+            })) as Property[];
+            setAllProperties(propertiesList);
+            console.log("Fetched all properties:", propertiesList.length);
+        } catch (error) {
+            console.error('Error fetching all properties:', error);
+            toast({
+                variant: 'destructive',
+                title: 'Error Loading Properties',
+                description: 'Could not load available properties for matching.',
+            });
+            setAllProperties([]); // Reset on error
+        } finally {
+            setLoadingProperties(false);
+        }
+    }, [toast]);
+
   // --- Initial Data Fetch ---
   useEffect(() => {
     if (!authLoading && isAuthenticated && user) {
       fetchMyIndividualTravels();
       fetchMyGroups();
+      fetchAllProperties(); // Fetch properties needed for matching
     }
-  }, [user, isAuthenticated, authLoading, fetchMyIndividualTravels, fetchMyGroups]);
+     // Cleanup function or dependencies adjustment might be needed
+     // if this effect should re-run under certain conditions.
+  }, [user, isAuthenticated, authLoading, fetchMyIndividualTravels, fetchMyGroups, fetchAllProperties]); // Added fetchAllProperties
 
-  // --- Function to Trigger Destination Matching (Placeholder/Disabled) ---
-  const triggerDestinationMatching = useCallback(async (travelData: Travel) => {
-    toast({ variant: 'destructive', title: 'Matching Disabled', description: 'Destination matching is temporarily disabled.' });
-    // In the future, this would:
-    // 1. Check if travelData has necessary info (departureCityIata, preferences, dates/duration)
-    // 2. Get candidate destination IATAs (from properties collection or a predefined list)
-    // 3. Call the findDestinationMatches flow
-    // 4. Update the travel document in Firestore with the results/status
-    console.log("Triggering matching for travel (disabled):", travelData.id);
-    return;
-  }, [toast]);
+
+  // --- Function to Trigger Destination Matching ---
+    const triggerDestinationMatching = useCallback(async (travelData: Travel) => {
+        console.log("Attempting to trigger matching for travel:", travelData.id);
+        if (!travelData.id) {
+            toast({ variant: 'destructive', title: 'Error', description: 'Travel ID is missing.' });
+            return;
+        }
+        if (!travelData.departureCityIata) {
+            toast({ variant: 'destructive', title: 'Missing Info', description: 'Departure city IATA code is required for matching.' });
+            return;
+        }
+         if (!travelData.tripDateStart || !travelData.tripDateEnd) {
+            toast({ variant: 'destructive', title: 'Missing Info', description: 'Trip start and end dates are required for matching.' });
+            return;
+        }
+        if (allProperties.length === 0) {
+             toast({ variant: 'destructive', title: 'Data Missing', description: 'No properties available to match against. Please try again later.' });
+             return;
+        }
+
+        // Extract candidate IATAs from properties (ensure uniqueness and validity)
+         const candidateIatas = [
+            ...new Set(
+                allProperties
+                .map(p => p.address.nearestAirportIata) // Assuming you add 'nearestAirportIata' to Property type/data
+                .filter((iata): iata is string => !!iata && iata.length === 3) // Filter out null/undefined and ensure length 3
+            )
+        ];
+
+         if (candidateIatas.length === 0) {
+            toast({ variant: 'destructive', title: 'No Destinations', description: 'No properties with associated airport codes found.' });
+            return;
+         }
+
+         console.log("Candidate destination IATAs for matching:", candidateIatas);
+
+
+        // Update travel status to 'matching' in Firestore
+        const travelRef = doc(db, 'travels', travelData.id);
+        try {
+            await updateDoc(travelRef, { status: 'matching', updatedAt: Timestamp.now() });
+            // Update local state as well (optional, depends on UI needs)
+            setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, status: 'matching' } : t));
+            toast({ title: 'Matching Started', description: 'Finding the best destinations for your trip...' });
+        } catch (error) {
+             console.error("Error updating travel status to 'matching':", error);
+             toast({ variant: 'destructive', title: 'Error', description: 'Could not start the matching process.' });
+             return; // Stop if status update fails
+        }
+
+
+        try {
+            // Prepare input for the AI flow
+            const moodPrefs = travelData.preferences.filter(p => p.startsWith('mood:')).map(p => p.substring(5));
+            const activityPrefs = travelData.preferences.filter(p => p.startsWith('activity:')).map(p => p.substring(9));
+             const startDateStr = format(travelData.tripDateStart.toDate(), 'yyyy-MM-dd');
+             const endDateStr = format(travelData.tripDateEnd.toDate(), 'yyyy-MM-dd');
+
+            const matchingInput: FindDestinationMatchesInput = {
+                moodPreferences: moodPrefs,
+                activityPreferences: activityPrefs,
+                departureCityIata: travelData.departureCityIata,
+                preferredStartDate: startDateStr,
+                preferredEndDate: endDateStr,
+                candidateDestinationIatas: candidateIatas, // Pass the list of available property locations
+                // durationDays is currently omitted as we have specific dates
+            };
+
+            console.log("Sending data to findDestinationMatches flow:", matchingInput);
+
+            // Call the Genkit flow
+            const result = await findDestinationMatches(matchingInput);
+
+            console.log("Received matching results:", result);
+
+            // Update travel status and results in Firestore
+            await updateDoc(travelRef, {
+                status: 'matched',
+                matches: result.rankedDestinations, // Store the ranked results
+                updatedAt: Timestamp.now(),
+            });
+
+            // Update local state
+             setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, status: 'matched', matches: result.rankedDestinations } : t));
+
+            toast({ title: 'Matching Complete!', description: 'Potential destinations found.' });
+
+        } catch (error) {
+            console.error("Error during destination matching flow:", error);
+             const message = error instanceof Error ? error.message : "An unknown error occurred during matching.";
+             // Update travel status to 'error' in Firestore
+              try {
+                await updateDoc(travelRef, { status: 'error', errorDetails: message, updatedAt: Timestamp.now() });
+                 setMyIndividualTravels(prev => prev.map(t => t.id === travelData.id ? { ...t, status: 'error', errorDetails: message } : t));
+              } catch (updateError) {
+                 console.error("Error updating travel status to 'error':", updateError);
+              }
+
+            toast({ variant: 'destructive', title: 'Matching Failed', description: message });
+        }
+
+    }, [toast, allProperties]); // Dependencies
+
 
   // --- Function to Save Travel Plan ---
    const saveTravelPlan = useCallback(async (data: TravelFormValues, preferences: string[]): Promise<Travel> => {
       if (!user) {
           throw new Error('You must be logged in to add a travel plan.');
       }
-      if (preferences.length === 0 && data.planningMode === 'guided') { // Check preferences only for guided mode initially
-          throw new Error('Please set mood/activity preferences.');
-      }
+       // Validate required fields explicitly before constructing the object
+       if (!data.departureCity) {
+           throw new Error("Departure city is required.");
+       }
+       if (!data.tripDateStart || !data.tripDateEnd) {
+            throw new Error("Both start and end dates are required.");
+       }
+       if (preferences.length === 0) {
+            throw new Error('Please set mood/activity preferences.');
+       }
+
 
       console.log("Attempting to save travel plan with preferences:", preferences, "and data:", data);
 
-      // Convert JS Date objects to Firestore Timestamps if they exist
-      const tripDateStartTimestamp = data.tripDateStart ? Timestamp.fromDate(data.tripDateStart) : null;
-      const tripDateEndTimestamp = data.tripDateEnd ? Timestamp.fromDate(data.tripDateEnd) : null;
+      // Convert JS Date objects to Firestore Timestamps
+      const tripDateStartTimestamp = Timestamp.fromDate(data.tripDateStart);
+      const tripDateEndTimestamp = Timestamp.fromDate(data.tripDateEnd);
 
 
       const travelToAdd: Omit<Travel, 'id'> = {
           userId: data.tripType === 'individual' ? user.uid : null,
           groupId: data.tripType === 'group' ? data.groupId! : null,
           departureCity: data.departureCity,
-          departureCityIata: data.departureCityIata || null, // Add IATA if available
+          departureCityIata: data.departureCityIata || null, // Use IATA code or null
           preferences: preferences, // Use the explicitly passed preferences
-          tripDateStart: tripDateStartTimestamp, // Use Timestamp or null
-          tripDateEnd: tripDateEndTimestamp, // Use Timestamp or null
+          tripDateStart: tripDateStartTimestamp, // Use Timestamp
+          tripDateEnd: tripDateEndTimestamp, // Use Timestamp
           places: [], // Initialize places as empty array
+          status: 'pending', // Initial status
           createdAt: Timestamp.now(),
           updatedAt: Timestamp.now(),
+          matches: [], // Initialize matches array
       };
 
       console.log("Data being sent to Firestore:", travelToAdd);
@@ -161,10 +297,11 @@ export function useTravelData() {
     myGroups,
     loadingTravels,
     loadingGroups,
+    loadingProperties, // Expose loading state for properties
     saveTravelPlan,
     triggerDestinationMatching,
     fetchMyIndividualTravels, // Expose fetch function if needed for manual refresh
     fetchMyGroups,
+    // fetchAllProperties is implicitly called, but can be exposed if needed
   };
 }
-```

@@ -91,7 +91,7 @@ export function GuidedMode({
         render={({ field }) => ( // `field` here is primarily for error reporting, value is handled by Controller
           <FormItem>
             <FormLabel className="flex items-center gap-1 text-base font-semibold">
-                <CalendarDays className="h-5 w-5" /> Trip Dates
+                <CalendarDays className="h-5 w-5" /> Trip Dates <span className='text-destructive'>*</span>
             </FormLabel>
             <FormControl>
               <Controller
@@ -113,6 +113,7 @@ export function GuidedMode({
              {/* Display validation errors for both start and end dates if they exist */}
              <FormMessage>{form.formState.errors.tripDateStart?.message}</FormMessage>
              <FormMessage>{form.formState.errors.tripDateEnd?.message}</FormMessage>
+             <p className="text-xs text-muted-foreground pt-1">Select the start and end dates for your trip.</p>
           </FormItem>
         )}
       />
@@ -151,6 +152,7 @@ export function GuidedMode({
               {getIconForValue('mood', selectedMoodValue)} {MOOD_OPTIONS[moodSliderValue]?.label}
             </p>
             <FormMessage />
+            <p className="text-xs text-muted-foreground pt-1 text-center">Slide to choose the overall vibe for your trip.</p>
           </FormItem>
         )}
       />
@@ -208,10 +210,10 @@ export function GuidedMode({
               />
             )}
             <FormMessage /> {/* For the main activity field */}
+             <p className="text-xs text-muted-foreground pt-1 text-center">Slide to pick the main type of activity you're interested in.</p>
           </FormItem>
         )}
       />
     </div>
   );
 }
-```

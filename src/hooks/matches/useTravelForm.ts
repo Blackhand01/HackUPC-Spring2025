@@ -12,11 +12,11 @@ export const travelFormSchema = z.object({
   tripType: z.enum(['individual', 'group'], { required_error: "Please select a trip type."}),
   groupId: z.string().optional(), // Required if tripType is 'group'
   departureCity: z.string().min(2, "Departure city is required."),
-  departureCityIata: z.string().min(3).max(3).optional().describe("IATA code needed for matching."), // Hidden field, potentially derived
+  departureCityIata: z.string().min(3).max(3).optional().nullable().describe("IATA code needed for matching."), // Updated: Allow null
 
-  // Date fields
-  tripDateStart: z.date().optional().describe("Start date of the trip."),
-  tripDateEnd: z.date().optional().describe("End date of the trip."),
+  // Date fields - Make them required for saving
+  tripDateStart: z.date({ required_error: "Start date is required." }).describe("Start date of the trip."),
+  tripDateEnd: z.date({ required_error: "End date is required." }).describe("End date of the trip."),
 
   // Mode 1: Guided Sliders
   mood: z.string().optional(),
@@ -34,12 +34,19 @@ export const travelFormSchema = z.object({
     if (data.activity === 'other') return !!data.activityOther && data.activityOther.trim().length > 0;
     return true;
 }, { message: "Please specify the 'other' activity.", path: ["activityOther"]})
-.refine(data => { // Refinement for date range
+.refine(data => { // Refinement for date range (ensure end date is after start date)
     if (data.tripDateStart && data.tripDateEnd) {
         return data.tripDateEnd >= data.tripDateStart;
     }
-    return true; // Allow if one or both are missing
-}, { message: "End date must be after start date.", path: ["tripDateEnd"]});
+    return true; // Allow validation if one or both are missing (handled by required)
+}, { message: "End date must be on or after start date.", path: ["tripDateEnd"]})
+.refine(data => { // Refinement for preferences (at least one preference needed)
+    if (data.planningMode === 'guided') {
+        return !!data.mood || !!data.activity; // In guided, either mood or activity must be set
+    }
+     // For AI mode, validation happens implicitly when checking extracted prefs before save
+    return true;
+}, { message: "Please select a mood or activity preference.", path: ["mood"] }); // Attach error to mood field
 
 
 export type TravelFormValues = z.infer<typeof travelFormSchema>;
@@ -51,7 +58,7 @@ export function useTravelForm(): UseFormReturn<TravelFormValues> {
       tripType: 'individual',
       groupId: undefined,
       departureCity: '',
-      departureCityIata: '', // Initialize hidden field
+      departureCityIata: null, // Initialize as null
       tripDateStart: new Date(), // Default to today
       tripDateEnd: addDays(new Date(), 7), // Default to 7 days from today
       mood: MOOD_OPTIONS[0].value,
@@ -65,4 +72,3 @@ export function useTravelForm(): UseFormReturn<TravelFormValues> {
 
   return form;
 }
-```

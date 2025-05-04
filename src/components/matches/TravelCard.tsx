@@ -4,7 +4,7 @@
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { User, LocateFixed, Smile, Mountain, Film, Users, Leaf, Utensils, Info, Heart, Search, XCircle, Loader2, CheckCircle, PlaneTakeoff } from 'lucide-react'; // Added PlaneTakeoff
+import { User, LocateFixed, Smile, Mountain, Film, Users, Leaf, Utensils, Info, Heart, Search, XCircle, Loader2, CheckCircle, PlaneTakeoff, CalendarDays } from 'lucide-react'; // Added PlaneTakeoff, CalendarDays
 import { format } from 'date-fns';
 import { type Travel } from '@/types';
 
@@ -63,14 +63,28 @@ export function TravelCard({ travel, onTriggerMatch }: TravelCardProps) {
     ? format(travel.createdAt.toDate(), "PP") // Use PP for localized date format
     : 'N/A';
 
+     // Safely format dates using optional chaining and typeof checks
+     const formattedStartDate = travel.tripDateStart && typeof travel.tripDateStart.toDate === 'function'
+        ? format(travel.tripDateStart.toDate(), "PP")
+        : null;
+     const formattedEndDate = travel.tripDateEnd && typeof travel.tripDateEnd.toDate === 'function'
+        ? format(travel.tripDateEnd.toDate(), "PP")
+        : null;
+
+
     // Example matching status (replace with actual props later)
     const isMatching = false; // Placeholder
     const matchCompleted = false; // Placeholder
     const matchError = false; // Placeholder
 
-   // Determine if matching can be triggered (example condition)
-   // Requires departure IATA and preferences. Dates/Duration might be needed too.
-   const canMatch = !!(travel.departureCity && travel.preferences && travel.preferences.length > 0 && travel.departureCityIata); // Matching now requires IATA code
+   // Determine if matching can be triggered
+   // Requires departure IATA, preferences, and valid dates.
+   const canMatch = !!(
+       travel.departureCityIata &&
+       travel.preferences && travel.preferences.length > 0 &&
+       formattedStartDate &&
+       formattedEndDate
+   );
 
 
   return (
@@ -88,6 +102,12 @@ export function TravelCard({ travel, onTriggerMatch }: TravelCardProps) {
             Departing from: <span className="font-medium text-foreground">{travel.departureCity || 'N/A'}</span>
             {travel.departureCityIata && <span className="text-xs bg-muted px-1 py-0.5 rounded">({travel.departureCityIata})</span>}
          </p>
+         {formattedStartDate && formattedEndDate && (
+             <p className="text-sm text-muted-foreground mt-1 flex items-center gap-1">
+                 <CalendarDays className="h-4 w-4" />
+                 Dates: <span className="font-medium text-foreground">{formattedStartDate} - {formattedEndDate}</span>
+             </p>
+         )}
       </CardHeader>
       <CardContent className="flex-grow space-y-2">
         {mood && (
@@ -157,7 +177,7 @@ export function TravelCard({ travel, onTriggerMatch }: TravelCardProps) {
                  </span>
             </TooltipTrigger>
              <TooltipContent>
-                <p>{canMatch ? "Find house swap destinations based on these preferences" : "Matching requires departure city with IATA code & preferences."}</p>
+                <p>{canMatch ? "Find house swap destinations based on these preferences" : "Matching requires departure city IATA, preferences & dates."}</p>
             </TooltipContent>
          </Tooltip>
       </CardFooter>

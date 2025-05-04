@@ -1,5 +1,6 @@
 // src/types/index.ts
 import { Timestamp } from 'firebase/firestore';
+import type { EnrichedDestination } from '@/ai/flows/find-destination-matches-flow'; // Import match type
 
 // Review Interface
 export interface Review {
@@ -20,17 +21,20 @@ export interface Place {
   country: string;
 }
 
-// Travel Interface - Simplified
+// Travel Interface - Added status, matches, errorDetails
 export interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
   departureCity: string;
-  departureCityIata?: string | null; // IATA code for departure city (optional)
+  departureCityIata?: string | null; // IATA code for departure city (optional but needed for matching)
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
-  tripDateStart?: Timestamp | null; // Added start date
-  tripDateEnd?: Timestamp | null; // Added end date
+  tripDateStart: Timestamp; // Make required for matching
+  tripDateEnd: Timestamp; // Make required for matching
   places?: Place[]; // Candidate or selected places
+  status: 'pending' | 'matching' | 'matched' | 'error' | 'booked' | 'archived'; // Added status field
+  matches?: EnrichedDestination[]; // Array to store matching results from AI flow
+  errorDetails?: string; // Store error message if matching fails
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 }
@@ -44,7 +48,7 @@ export interface Group {
   users: string[]; // Array of userIds
 }
 
-// Property Interface
+// Property Interface - Added nearestAirportIata
 export interface Property {
   id?: string; // Firestore document ID
   hostId: string;
@@ -53,8 +57,7 @@ export interface Property {
     city: string;
     country: string;
     coordinates?: { lat: number | null; lng: number | null };
-    // Potential addition: IATA code for the nearest airport
-    nearestAirportIata?: string;
+    nearestAirportIata?: string | null; // Added nearest airport IATA code
   };
   description: string;
   amenities: string[];
@@ -78,4 +81,3 @@ export interface ChatMessage {
 }
 
 // --- You can add more shared types here as needed ---
-```

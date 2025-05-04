@@ -8,7 +8,7 @@ import { type ChatMessage } from '@/types';
 import { type UseFormReturn } from 'react-hook-form';
 import { type TravelFormValues } from './useTravelForm';
 import { MOOD_OPTIONS, ACTIVITY_OPTIONS } from '@/config/matches';
-import { parseISO } from 'date-fns'; // Import date parsing function
+import { parseISO, isValid, isBefore, startOfDay } from 'date-fns'; // Import date parsing and validation functions
 
 interface UseAiChatProps {
   form: UseFormReturn<TravelFormValues>; // Pass the form instance
@@ -36,34 +36,69 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
        console.log("AI Extracted Data for Form Update:", data);
        const { mood, activity, activityOther, departureCity, tripDateStart, tripDateEnd } = data;
        let updated = false; // Track if any form value was actually updated
+       let needsDateValidation = false; // Track if dates need re-validation
 
        if (departureCity && departureCity !== form.getValues('departureCity')) {
             form.setValue('departureCity', departureCity, { shouldValidate: true });
             updated = true;
        }
 
+       let validStartDate: Date | null = null;
+       let validEndDate: Date | null = null;
+
+        // Validate and set start date
        if (tripDateStart) {
            try {
-               const startDate = parseISO(tripDateStart);
-               if (startDate.toISOString() !== form.getValues('tripDateStart')?.toISOString()) {
-                   form.setValue('tripDateStart', startDate, { shouldValidate: true });
-                   updated = true;
+               const parsedStartDate = parseISO(tripDateStart);
+               if (isValid(parsedStartDate)) {
+                    validStartDate = startOfDay(parsedStartDate); // Normalize to start of day
+                    if (!form.getValues('tripDateStart') || validStartDate.toISOString() !== form.getValues('tripDateStart')?.toISOString()) {
+                        form.setValue('tripDateStart', validStartDate, { shouldValidate: false }); // Don't validate immediately
+                        updated = true;
+                        needsDateValidation = true;
+                    }
+               } else {
+                   console.warn(`AI provided invalid start date format: ${tripDateStart}`);
+                   toast({ variant: 'destructive', title: "AI Error", description: "AI provided an invalid start date format." });
                }
            } catch (e) {
-               console.warn(`AI provided invalid start date format: ${tripDateStart}`);
+               console.warn(`Error parsing start date: ${tripDateStart}`, e);
+                toast({ variant: 'destructive', title: "AI Error", description: "Error processing start date from AI." });
            }
        }
-        if (tripDateEnd) {
+
+       // Validate and set end date
+       if (tripDateEnd) {
            try {
-               const endDate = parseISO(tripDateEnd);
-                if (endDate.toISOString() !== form.getValues('tripDateEnd')?.toISOString()) {
-                   form.setValue('tripDateEnd', endDate, { shouldValidate: true });
-                   updated = true;
-                }
+               const parsedEndDate = parseISO(tripDateEnd);
+               if (isValid(parsedEndDate)) {
+                    validEndDate = startOfDay(parsedEndDate); // Normalize to start of day
+                    if (!form.getValues('tripDateEnd') || validEndDate.toISOString() !== form.getValues('tripDateEnd')?.toISOString()) {
+                        form.setValue('tripDateEnd', validEndDate, { shouldValidate: false }); // Don't validate immediately
+                        updated = true;
+                        needsDateValidation = true;
+                    }
+               } else {
+                   console.warn(`AI provided invalid end date format: ${tripDateEnd}`);
+                   toast({ variant: 'destructive', title: "AI Error", description: "AI provided an invalid end date format." });
+               }
            } catch (e) {
-               console.warn(`AI provided invalid end date format: ${tripDateEnd}`);
+               console.warn(`Error parsing end date: ${tripDateEnd}`, e);
+                toast({ variant: 'destructive', title: "AI Error", description: "Error processing end date from AI." });
            }
        }
+
+        // Check date consistency after both are potentially set
+        const currentStartDate = form.getValues('tripDateStart');
+        const currentEndDate = form.getValues('tripDateEnd');
+        if (currentStartDate && currentEndDate && isBefore(currentEndDate, currentStartDate)) {
+            console.warn("AI suggested end date is before start date.");
+            toast({ variant: 'destructive', title: "AI Suggestion Conflict", description: "AI suggested an end date before the start date. Please adjust." });
+            // Optionally reset one or both dates here, or let validation handle it
+            // form.setValue('tripDateEnd', undefined, { shouldValidate: false }); // Example: Reset end date
+            needsDateValidation = true; // Ensure validation runs
+        }
+
 
        if (mood) {
            const moodOption = MOOD_OPTIONS.find(opt => opt.value === mood);
@@ -74,6 +109,7 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
                updated = true;
            } else if (!moodOption) {
                 console.warn(`AI suggested unknown mood: ${mood}`);
+                 toast({ variant: 'destructive', title: "AI Error", description: `AI suggested an unknown mood: ${mood}` });
            }
        }
 
@@ -97,6 +133,7 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
                   }
              } else if (activity === 'other' && !activityOther) {
                   console.warn(`AI suggested 'other' activity but didn't provide details.`);
+                   toast({ title: "AI Suggestion", description: "AI suggested 'other' activity. Please describe it if needed." });
                   // Keep 'other' selected, prompt user? or clear? Let's keep it selected.
                    if (activity !== form.getValues('activity')) {
                        form.setValue('activity', 'other', { shouldValidate: true });
@@ -106,13 +143,19 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
                    }
              } else if (!activityOption) {
                  console.warn(`AI suggested unknown activity: ${activity}`);
+                 toast({ variant: 'destructive', title: "AI Error", description: `AI suggested an unknown activity: ${activity}` });
              }
         }
 
-         // Only show toast if data was actually updated
+         // Trigger validation manually if dates were potentially updated or inconsistent
+         if (needsDateValidation) {
+            form.trigger(['tripDateStart', 'tripDateEnd']);
+         }
+
+        // Only show toast if data was actually updated
         if (updated) {
             toast({ title: "AI Update", description: "Preferences updated based on chat. Review and save." });
-            form.trigger(); // Re-validate after AI updates
+            form.trigger(); // Re-validate other fields after AI updates
         }
 
    }, [form, setMoodSliderValue, setActivitySliderValue, toast]);
@@ -216,4 +259,3 @@ export function useAiChat({ form, setMoodSliderValue, setActivitySliderValue }: 
     setChatHistory, // Expose if needed for resetting
   };
 }
-```

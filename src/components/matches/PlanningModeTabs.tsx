@@ -93,4 +93,3 @@ export function PlanningModeTabs({ form, isSubmitting, onPreferencesExtracted }:
     />
   );
 }
-```
