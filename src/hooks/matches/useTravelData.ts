@@ -11,6 +11,31 @@ import { type TravelFormValues } from './useTravelForm';
 import { format } from 'date-fns';
 import { findDestinationMatches, type FindDestinationMatchesInput } from '@/ai/flows/find-destination-matches-flow';
 
+// --- Mock IATA Data (Replace with actual fetching/loading logic) ---
+// In a real app, fetch this from a file in /public, an API, GCS, or database.
+const MOCK_IATA_DATA: { [cityName: string]: string } = {
+    "torino": "TRN",
+    "milan": "MXP", // Assuming MXP for Milan
+    "london": "LHR", // Assuming LHR for London
+    "barcelona": "BCN",
+    "lisbon": "LIS",
+    "dubrovnik": "DBV",
+    "marrakech": "RAK",
+    "valencia": "VLC",
+    "athens": "ATH",
+    "naples": "NAP",
+    "rome": "FCO", // Assuming FCO for Rome
+    "paris": "CDG", // Assuming CDG for Paris
+    "new york": "JFK", // Assuming JFK for New York
+    // Add more mappings as needed
+};
+
+const getIataCodeForCity = (cityName: string): string | null => {
+    return MOCK_IATA_DATA[cityName.toLowerCase()] || null;
+};
+// --- End Mock Data ---
+
+
 export function useTravelData() {
   const { user, isAuthenticated, loading: authLoading } = useAuth();
   const { toast } = useToast();
@@ -143,39 +168,62 @@ export function useTravelData() {
             return;
         }
 
-
-        if (!travelData.departureCityIata) {
-            toast({ variant: 'destructive', title: 'Missing Info', description: 'Departure city IATA code is required for matching.' });
+        // --- Validation ---
+        if (!travelData.departureCity) {
+            toast({ variant: 'destructive', title: 'Missing Info', description: 'Departure city is required for matching.' });
             return;
         }
          if (!travelData.tripDateStart || !travelData.tripDateEnd) {
             toast({ variant: 'destructive', title: 'Missing Info', description: 'Trip start and end dates are required for matching.' });
             return;
         }
+        if (!travelData.preferences || travelData.preferences.length === 0) {
+             toast({ variant: 'destructive', title: 'Missing Info', description: 'Preferences (mood/activity) are required for matching.' });
+             return;
+        }
         if (allProperties.length === 0) {
              toast({ variant: 'destructive', title: 'Data Missing', description: 'No properties available to match against. Please try again later.' });
              return;
         }
 
-        // Extract candidate IATAs from properties
-        const candidateIatas = [...new Set(
-            allProperties
-                .map(p => p.address.nearestAirportIata)
-                .filter((iata): iata is string => !!iata && iata.length === 3)
-        )];
+        // --- Look up Departure IATA ---
+        const departureIata = getIataCodeForCity(travelData.departureCity);
+         if (!departureIata) {
+             toast({ variant: 'destructive', title: 'IATA Not Found', description: `Could not find IATA code for departure city: ${travelData.departureCity}. Matching cannot proceed.` });
+             return;
+         }
+          console.log(`Found departure IATA ${departureIata} for city ${travelData.departureCity}`);
 
-         if (candidateIatas.length === 0) {
-            toast({ variant: 'destructive', title: 'No Destinations', description: 'No properties with associated airport codes found.' });
+        // --- Prepare Candidate Destinations (City Names and IATA Codes) ---
+        // Get unique city names from properties that have an IATA code
+        const cityIataMap = new Map<string, string>();
+        allProperties.forEach(prop => {
+            if (prop.address.city && prop.address.nearestAirportIata && !cityIataMap.has(prop.address.city.toLowerCase())) {
+                cityIataMap.set(prop.address.city.toLowerCase(), prop.address.nearestAirportIata);
+            }
+        });
+        const candidateCities = Array.from(cityIataMap.keys()); // City names for Gemini
+        const candidateIatas = Array.from(cityIataMap.values()); // IATA codes for Skyscanner
+
+
+         if (candidateCities.length === 0) {
+            toast({ variant: 'destructive', title: 'No Destinations', description: 'No properties with associated airport codes/cities found.' });
             return;
          }
-         console.log("Candidate destination IATAs for matching:", candidateIatas);
+         console.log("Candidate destination cities for matching:", candidateCities);
 
 
         // Update status locally and in Firestore
         setMatchingStatus(prev => ({ ...prev, [travelId]: 'matching' }));
         const travelRef = doc(db, 'travels', travelId);
         try {
-            await updateDoc(travelRef, { status: 'matching', errorDetails: null, updatedAt: Timestamp.now() });
+            // Update departureCityIata in Firestore as well
+            await updateDoc(travelRef, {
+                status: 'matching',
+                errorDetails: null,
+                updatedAt: Timestamp.now(),
+                departureCityIata: departureIata, // Save the looked-up IATA
+            });
             toast({ title: 'Matching Started', description: 'Finding the best destinations for your trip...' });
         } catch (error) {
              console.error("Error updating travel status to 'matching':", error);
@@ -195,10 +243,12 @@ export function useTravelData() {
             const matchingInput: FindDestinationMatchesInput = {
                 moodPreferences: moodPrefs,
                 activityPreferences: activityPrefs,
-                departureCityIata: travelData.departureCityIata,
+                departureCityIata: departureIata, // Use the looked-up IATA
+                departureCityName: travelData.departureCity, // Pass city name for Gemini prompt
                 preferredStartDate: startDateStr,
                 preferredEndDate: endDateStr,
-                candidateDestinationIatas: candidateIatas,
+                candidateDestinationCities: candidateCities, // Pass city names to Gemini
+                candidateDestinationIatas: candidateIatas, // Pass IATAs for Skyscanner enrichment
             };
 
             console.log("Sending data to findDestinationMatches flow:", matchingInput);
@@ -213,7 +263,7 @@ export function useTravelData() {
             });
 
             // Update local state (travel list and status)
-            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'matched', matches: result.rankedDestinations } : t));
+            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'matched', departureCityIata: departureIata, matches: result.rankedDestinations } : t));
             setMatchingStatus(prev => ({ ...prev, [travelId]: 'matched' }));
             toast({ title: 'Matching Complete!', description: 'Potential destinations found.' });
 
@@ -229,12 +279,12 @@ export function useTravelData() {
             }
 
             // Update local state
-            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'error', errorDetails: message } : t));
+            setMyIndividualTravels(prev => prev.map(t => t.id === travelId ? { ...t, status: 'error', departureCityIata: departureIata, errorDetails: message } : t));
             setMatchingStatus(prev => ({ ...prev, [travelId]: 'error' }));
             toast({ variant: 'destructive', title: 'Matching Failed', description: message });
         }
 
-    }, [toast, allProperties, matchingStatus]); // Include matchingStatus in dependencies
+    }, [toast, allProperties, matchingStatus, user]); // Added user dependency
 
 
   // --- Function to Save Travel Plan ---
@@ -258,17 +308,16 @@ export function useTravelData() {
       const tripDateStartTimestamp = Timestamp.fromDate(data.tripDateStart);
       const tripDateEndTimestamp = Timestamp.fromDate(data.tripDateEnd);
 
-        // Attempt to find IATA for the departure city from properties
-        const departureProperty = allProperties.find(p => p.address.city.toLowerCase() === data.departureCity.toLowerCase());
-        const departureIata = departureProperty?.address.nearestAirportIata || null;
-        console.log(`Departure City: ${data.departureCity}, Found IATA: ${departureIata}`);
+        // IATA is looked up *during* matching, not on save. Initialize as null.
+        const departureIata = null; // We don't need to look it up here anymore.
+        console.log(`Departure City: ${data.departureCity}. IATA will be looked up during matching.`);
 
 
       const travelToAdd: Omit<Travel, 'id'> = {
           userId: data.tripType === 'individual' ? user.uid : null,
           groupId: data.tripType === 'group' ? data.groupId! : null,
           departureCity: data.departureCity,
-          departureCityIata: departureIata, // Use found IATA or null
+          departureCityIata: departureIata, // Initialize as null
           preferences: preferences,
           tripDateStart: tripDateStartTimestamp,
           tripDateEnd: tripDateEndTimestamp,
@@ -307,12 +356,13 @@ export function useTravelData() {
            const message = error instanceof Error ? error.message : 'An unknown error occurred.';
           throw new Error(`Failed to save your travel plan: ${message}`);
       }
-  }, [user, allProperties]); // Added allProperties
+  }, [user]); // Removed allProperties dependency
 
 
   return {
     myIndividualTravels,
     myGroups,
+    allProperties, // Expose allProperties
     loadingTravels,
     loadingGroups,
     loadingProperties,
@@ -320,6 +370,6 @@ export function useTravelData() {
     triggerDestinationMatching,
     fetchMyIndividualTravels,
     fetchMyGroups,
-    matchingStatus, // Expose matching status
+    matchingStatus,
   };
 }

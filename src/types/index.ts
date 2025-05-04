@@ -21,20 +21,20 @@ export interface Place {
   country: string;
 }
 
-// Travel Interface - Added status, matches, errorDetails, departureCityIata
+// Travel Interface - Updated fields for matching clarity
 export interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
-  departureCity: string;
-  departureCityIata: string | null; // IATA code for departure city (optional but needed for matching)
-  preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
-  tripDateStart: Timestamp; // Make required for matching
-  tripDateEnd: Timestamp; // Make required for matching
+  departureCity: string; // Required for matching
+  departureCityIata: string | null; // Derived, nullable
+  preferences: string[]; // Required, needs mood & activity for matching
+  tripDateStart: Timestamp; // Required for matching
+  tripDateEnd: Timestamp; // Required for matching
   places?: Place[]; // Candidate or selected places
-  status: 'pending' | 'matching' | 'matched' | 'error' | 'booked' | 'archived'; // Added status field
+  status: 'pending' | 'matching' | 'matched' | 'error' | 'booked' | 'archived';
   matches?: EnrichedDestination[]; // Array to store matching results from AI flow
-  errorDetails?: string | null; // Store error message if matching fails (allow null)
+  errorDetails?: string | null;
   createdAt: Timestamp;
   updatedAt?: Timestamp;
 }
@@ -55,10 +55,10 @@ export interface Property {
   hostId: string;
   title: string;
   address: {
-    city: string;
+    city: string; // City name is crucial for matching
     country: string;
     coordinates?: { lat: number | null; lng: number | null };
-    nearestAirportIata: string | null; // Added nearest airport IATA code (allow null)
+    nearestAirportIata: string | null; // IATA code (allow null)
   };
   description: string;
   amenities: string[];
