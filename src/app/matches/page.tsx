@@ -14,21 +14,20 @@ import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter, DialogDescription } from '@/components/ui/dialog';
-import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle, Timer } from 'lucide-react'; // Removed Timer icon
+import { Loader2, PlusCircle, PlaneTakeoff, Calendar, MapPin, Heart, User, List, SlidersHorizontal, Wand2, Smile, Mountain, Film, Users as UsersIcon, Utensils, Info, CalendarDays, Leaf, UserPlus, Group, Bot, Send, LocateFixed, Search, BarChart, Euro, Thermometer, Clock, XCircle } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-// Removed date-related imports: Popover, CalendarIcon, ShadCalendar, format
 import { cn } from "@/lib/utils";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue, SelectGroup, SelectLabel } from "@/components/ui/select";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Textarea } from '@/components/ui/textarea';
-import { ScrollArea } from '@/components/ui/scroll-area';
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { planTravelAssistant, type PlanTravelAssistantInput, type PlanTravelAssistantOutput } from '@/ai/flows/plan-travel-assistant-flow';
-// Removed findDestinationMatches import as matching is disabled
 import { Form, FormField, FormItem, FormLabel, FormControl, FormMessage } from '@/components/ui/form';
 import { type Travel, type Group, type Place } from '@/types'; // Import shared types
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"; // Added Tooltip
+import { format } from 'date-fns';
 
 // --- Emotional Planning Constants ---
 const MOOD_OPTIONS = [
@@ -46,9 +45,6 @@ const ACTIVITY_OPTIONS = [
     { value: "foodie", label: "Foodie", icon: <Utensils className="h-4 w-4" /> },
     { value: "other", label: "Other...", icon: <Info className="h-4 w-4" /> },
 ];
-// Removed MAX_DURATION_DAYS
-// Removed CANDIDATE_DESTINATIONS_EUROPE
-
 
 // Define Zod schema for the new travel form validation - Simplified (No Dates/Duration)
 const travelFormSchema = z.object({
@@ -61,27 +57,16 @@ const travelFormSchema = z.object({
   activity: z.string().optional(),
   activityOther: z.string().optional(),
   // Mode 2: AI
-  aiPrompt: z.string().optional(),
+  aiPrompt: z.string().optional(), // Keep for potential initial trigger? Or remove? Let's keep for now.
   planningMode: z.enum(['guided', 'ai']).default('guided'),
-}).refine(data => {
+}).refine(data => { // Refinement for groupId
     if (data.tripType === 'group') return !!data.groupId;
     return true;
 }, { message: "Please select a group for a group trip.", path: ["groupId"]})
-.refine(data => {
+.refine(data => { // Refinement for activityOther
     if (data.activity === 'other') return !!data.activityOther && data.activityOther.trim().length > 0;
     return true;
-}, { message: "Please specify the 'other' activity.", path: ["activityOther"]})
-.refine(data => {
-    // Ensure at least one preference is set if using guided mode
-    if (data.planningMode === 'guided') {
-        return !!data.mood || !!data.activity;
-    }
-    // Ensure AI prompt is set if using AI mode (initial check, might be refined later)
-    if (data.planningMode === 'ai') {
-        return !!data.aiPrompt?.trim(); // Check if AI prompt has content (or rely on chat history)
-    }
-    return false; // Should not happen
-}, { message: "Please specify mood/activity (Guided) or chat with the AI.", path: ["mood"] }); // Attach error to a common field
+}, { message: "Please specify the 'other' activity.", path: ["activityOther"]});
 
 type TravelFormValues = z.infer<typeof travelFormSchema>;
 
@@ -102,7 +87,6 @@ export default function MyTravelsPage() {
   const [loadingGroups, setLoadingGroups] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  // Removed processingMatchId state
 
   // State for Mode 1 (Sliders)
   const [moodSliderValue, setMoodSliderValue] = useState(0);
@@ -126,14 +110,18 @@ export default function MyTravelsPage() {
       activityOther: '',
       aiPrompt: '', // Initialize AI prompt field
       planningMode: 'guided',
-      // Removed date/duration defaults
     },
     mode: 'onChange', // Validate on change for better feedback
   });
 
-   // Watch form validity
-   const isFormValid = form.formState.isValid;
-   const planningMode = useWatch({ control: form.control, name: 'planningMode' });
+   // Watch form values needed for button logic
+   const watchedValues = useWatch({ control: form.control });
+   const planningMode = watchedValues.planningMode;
+   const tripType = watchedValues.tripType;
+   const departureCity = watchedValues.departureCity;
+   const groupId = watchedValues.groupId;
+   const mood = watchedValues.mood;
+   const activity = watchedValues.activity;
 
 
   // --- Effect for Authentication Check ---
@@ -151,7 +139,6 @@ export default function MyTravelsPage() {
         try {
           const travelsCollection = collection(db, 'travels');
           // Query for individual travels (userId matches, groupId is null)
-          // Removed destinationMatchesStatus filtering as it's removed
           const q = query(travelsCollection, where('userId', '==', user.uid), where('groupId', '==', null));
           const querySnapshot = await getDocs(q);
           const travelsList = querySnapshot.docs.map(doc => ({
@@ -186,7 +173,6 @@ export default function MyTravelsPage() {
               const groupsList = querySnapshot.docs.map(doc => ({
                   id: doc.id,
                   groupName: doc.data().groupName || `Group ${doc.id.substring(0,5)}`,
-                  // Add other necessary group fields if needed
               })) as Group[]; // Ensure Group type includes needed fields
               setMyGroups(groupsList);
           } catch (error) {
@@ -209,15 +195,8 @@ export default function MyTravelsPage() {
   // --- Function to Trigger Destination Matching (DISABLED) ---
   const triggerDestinationMatching = useCallback(async (travelData: Travel) => {
        toast({ variant: 'destructive', title: 'Matching Disabled', description: 'Destination matching is temporarily disabled.' });
-       // Function remains but does nothing, or you can comment out calls to it.
        return;
-    // // Matching now strictly requires dateRange
-    // if (!travelData.id || !travelData.dateRange?.start || !travelData.dateRange?.end || !travelData.departureCity) {
-    //   toast({ variant: 'destructive', title: 'Matching Error', description: 'Specific dates and departure city are required to find matches.' });
-    //   return;
-    // }
-    // // ... rest of the matching logic (commented out or removed)
-  }, [toast]); // Include dependencies
+  }, [toast]);
 
 
   // --- Form Submission ---
@@ -231,44 +210,40 @@ export default function MyTravelsPage() {
     console.log("Submitting Travel Form Data (Simplified):", data); // Log form data
 
     const preferences: string[] = [];
+    let preferencesSet = false; // Flag to check if preferences were actually set
+
     // Get preferences based on the planning mode
     if (data.planningMode === 'guided') {
-         if (data.mood) preferences.push(`mood:${data.mood}`);
+         if (data.mood) {
+             preferences.push(`mood:${data.mood}`);
+             preferencesSet = true;
+         }
          if (data.activity === 'other' && data.activityOther) {
              preferences.push(`activity:other:${data.activityOther.trim()}`);
+             preferencesSet = true;
          } else if (data.activity && data.activity !== 'other') {
              preferences.push(`activity:${data.activity}`);
+             preferencesSet = true;
          }
     } else if (data.planningMode === 'ai' && chatHistory.length > 0) {
-         // Extract preferences from AI chat history (logic remains the same, but ensures chat was used)
-          const lastAiMessage = chatHistory.filter(m => m.sender === 'ai').pop();
-          // This assumes the planTravelAssistant flow output includes extractedData
-          // You might need to call the flow again here to get the final extracted data,
-          // or store the extracted data alongside the chat history.
-          // For now, we'll extract from the form fields potentially populated by AI.
-          // This is a simplification and might need adjustment based on how AI data is stored.
-          if (form.getValues('mood')) preferences.push(`mood:${form.getValues('mood')}`);
-           const activity = form.getValues('activity');
-           const activityOther = form.getValues('activityOther');
-           if (activity === 'other' && activityOther) {
-               preferences.push(`activity:other:${activityOther.trim()}`);
-           } else if (activity && activity !== 'other') {
-               preferences.push(`activity:${activity}`);
+          if (form.getValues('mood')) {
+              preferences.push(`mood:${form.getValues('mood')}`);
+              preferencesSet = true;
+          }
+           const currentActivity = form.getValues('activity');
+           const currentActivityOther = form.getValues('activityOther');
+           if (currentActivity === 'other' && currentActivityOther) {
+               preferences.push(`activity:other:${currentActivityOther.trim()}`);
+               preferencesSet = true;
+           } else if (currentActivity && currentActivity !== 'other') {
+               preferences.push(`activity:${currentActivity}`);
+               preferencesSet = true;
            }
            console.log("Preferences extracted from AI mode form state:", preferences);
-    } else {
-        // Fallback or error if no preferences are found
-        console.warn("No preferences could be determined for saving.");
-         // Add preferences directly from guided mode even if AI was selected but not used?
-         if (data.mood) preferences.push(`mood:${data.mood}`);
-         if (data.activity === 'other' && data.activityOther) {
-             preferences.push(`activity:other:${data.activityOther.trim()}`);
-         } else if (data.activity && data.activity !== 'other') {
-             preferences.push(`activity:${data.activity}`);
-         }
     }
 
-     if (preferences.length === 0) {
+     // Check if preferences were actually set based on the mode
+     if (!preferencesSet) {
          toast({ variant: 'destructive', title: 'Missing Preferences', description: 'Please set mood/activity or use the AI assistant.' });
          setIsSubmitting(false);
          return;
@@ -278,18 +253,14 @@ export default function MyTravelsPage() {
     let newTravelDocId: string | null = null; // To store the ID of the newly created doc
 
     try {
-       // Removed dateRangeValue and durationValue logic
-
        const travelToAdd: Omit<Travel, 'id'> = {
         userId: data.tripType === 'individual' ? user.uid : null,
         groupId: data.tripType === 'group' ? data.groupId! : null,
         departureCity: data.departureCity, // Save departure city
         preferences: preferences,
-        // Removed dateRange and durationDays
         places: [], // Initialize places as empty array
         createdAt: Timestamp.now(),
         updatedAt: Timestamp.now(), // Set updatedAt on creation
-        // Removed destination matching fields
       };
 
       console.log("Data being sent to Firestore (Simplified):", travelToAdd); // Log data before sending
@@ -299,22 +270,19 @@ export default function MyTravelsPage() {
 
       toast({
         title: 'Travel Plan Added!',
-        description: `Your new ${data.tripType} travel plan has been saved.`, // Removed matching notice
+        description: `Your new ${data.tripType} travel plan has been saved.`,
       });
 
       const newTravelData: Travel = {
           ...travelToAdd,
           id: newTravelDocId,
-          // Removed dateRange and durationDays ensure correct type
           createdAt: travelToAdd.createdAt,
           updatedAt: travelToAdd.updatedAt,
       };
 
        if (data.tripType === 'individual') {
             setMyIndividualTravels(prev => [...prev, newTravelData]);
-            // Do not trigger matching: triggerDestinationMatching(newTravelData);
        } else {
-           // For group trips, redirect to the groups page
            toast({ title: 'Group Trip Added', description: 'The new trip plan is now associated with the group.' });
            router.push('/groups');
        }
@@ -331,7 +299,6 @@ export default function MyTravelsPage() {
           activityOther: '',
           aiPrompt: '',
           planningMode: 'guided',
-          // Removed date/duration reset
       });
       setMoodSliderValue(0);
       setActivitySliderValue(0);
@@ -367,8 +334,6 @@ export default function MyTravelsPage() {
         }
     };
 
-    // Removed handleDateChange, handleDateInputModeChange handlers
-
      // --- AI Chat Handlers ---
     const handleAiInputChange = (event: React.ChangeEvent<HTMLTextAreaElement>) => {
         setCurrentUserInput(event.target.value);
@@ -390,7 +355,6 @@ export default function MyTravelsPage() {
 
         try {
             const aiInput: PlanTravelAssistantInput = {
-                // Pass current chat history, including the new user message implicitly via userPrompt
                  currentChat: chatHistory.map(m => ({ role: m.sender === 'user' ? 'user' : 'ai', text: m.message })),
                  userPrompt: userMessage.message, // Pass the latest message explicitly
             };
@@ -406,7 +370,6 @@ export default function MyTravelsPage() {
             // --- Update Form Values based on AI Output ---
             console.log("AI Extracted Data:", aiOutput.extractedData);
             if (aiOutput.extractedData) {
-                 // Removed date/duration extraction logic
                  const { mood, activity, activityOther } = aiOutput.extractedData;
 
                 if (mood) {
@@ -498,6 +461,28 @@ export default function MyTravelsPage() {
         }
         return null;
     };
+
+    // --- Determine if Save button should be enabled ---
+    const checkCanSave = (): boolean => {
+        // Basic required fields: departure city and group selection (if group trip)
+        if (!departureCity || (tripType === 'group' && !groupId)) {
+            return false;
+        }
+
+        // Preference check based on mode
+        if (planningMode === 'guided') {
+            // At least one preference (mood or activity) must be set, and if activity is 'other', activityOther must be filled
+            const isActivityValid = activity === 'other' ? !!form.getValues('activityOther')?.trim() : !!activity;
+            return !!mood || isActivityValid;
+        } else if (planningMode === 'ai') {
+            // AI mode needs chat history AND preferences extracted by AI (mood or activity must have a value)
+            // Check if mood or activity has been set (likely by AI interaction)
+             const isActivityValid = form.getValues('activity') === 'other' ? !!form.getValues('activityOther')?.trim() : !!form.getValues('activity');
+            return chatHistory.length > 0 && (!!form.getValues('mood') || isActivityValid);
+        }
+        return false; // Should not happen
+    };
+    const canSave = checkCanSave();
 
 
   // --- Render Logic ---
@@ -734,15 +719,6 @@ export default function MyTravelsPage() {
                                                 )}
                                             />
 
-                                             {/* Date / Duration Selection REMOVED */}
-
-
-                                             {/* Display top-level form errors related to preference refinement */}
-                                              {form.formState.errors.mood && form.formState.errors.mood.type === 'refine' && (
-                                                <p className="text-sm text-destructive text-center font-semibold pt-2">{form.formState.errors.mood.message}</p>
-                                              )}
-
-
                                          </TabsContent>
 
                                         <TabsContent value="ai">
@@ -795,11 +771,9 @@ export default function MyTravelsPage() {
 
                     <DialogFooter>
                         <Button type="button" variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={isSubmitting}>Cancel</Button>
-                        {/* Button disabled state depends on form validity AND loading state */}
-                         {/* Enable save button if form is valid OR if AI mode is selected and chat has history */}
                           <Button
                              type="submit"
-                             disabled={isSubmitting || isAiLoading || !(isFormValid || (planningMode === 'ai' && chatHistory.length > 0 && !!form.getValues('departureCity')))}
+                             disabled={isSubmitting || isAiLoading || !canSave} // Use the calculated canSave state
                            >
                              {(isSubmitting || isAiLoading) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                              {(isSubmitting || isAiLoading) ? 'Saving...' : 'Save Travel Plan'}
@@ -839,13 +813,9 @@ export default function MyTravelsPage() {
              const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
               const formattedCreatedAt = travel.createdAt && typeof travel.createdAt.toDate === 'function'
-                ? travel.createdAt.toDate().toLocaleDateString()
+                ? format(travel.createdAt.toDate(), "PP") // Use PP for localized date format
                 : 'N/A';
 
-             // Removed date formatting
-             // Removed matching status variables
-
-             // Matching is disabled as it requires dates
              const canMatch = false;
              const isMatching = false;
              const matchCompleted = false;
@@ -866,7 +836,6 @@ export default function MyTravelsPage() {
                         <LocateFixed className="h-4 w-4"/>
                          Departing from: <span className="font-medium text-foreground">{travel.departureCity}</span>
                     </p>
-                     {/* Removed date/duration display */}
                 </CardHeader>
                 <CardContent className="flex-grow space-y-2">
                     {mood && (
@@ -895,7 +864,6 @@ export default function MyTravelsPage() {
                      <div className="pt-4 border-t mt-4">
                         <h4 className="text-sm font-semibold mb-2">Destination Matches</h4>
                          <p className="text-sm text-muted-foreground italic">Destination matching is currently disabled.</p>
-                         {/* Removed conditional rendering based on matching status */}
                      </div>
 
 
@@ -924,7 +892,6 @@ export default function MyTravelsPage() {
                             <p>Destination matching requires dates (temporarily disabled)</p>
                         </TooltipContent>
                      </Tooltip>
-                    {/* <Button variant="outline" size="sm">View Details</Button> */}
                 </CardFooter>
                 </Card>
              );
