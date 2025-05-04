@@ -1,9 +1,9 @@
 // src/app/matches/page.tsx
 'use client';
 
-import { useState, useEffect } from 'react'; // Added useEffect
+import { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation'; // Import useRouter
+import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Loader2, PlusCircle, User, PlaneTakeoff } from 'lucide-react';
@@ -12,14 +12,14 @@ import { useTravelData } from '@/hooks/matches/useTravelData';
 import { CreateTravelDialog } from '@/components/matches/CreateTravelDialog';
 import { TravelCard } from '@/components/matches/TravelCard';
 import { TooltipProvider } from '@/components/ui/tooltip';
-import { type Travel } from '@/types'; // Import Travel type
+import { type Travel } from '@/types';
 
 export default function MyTravelsPage() {
+  // --- Call ALL hooks unconditionally at the top level ---
   const { user, isAuthenticated, loading: authLoading } = useAuth();
-  const router = useRouter(); // Initialize useRouter
-  const { toast } = useToast();
-  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-
+  const router = useRouter();
+  const { toast } = useToast(); // Called unconditionally
+  const [isAddDialogOpen, setIsAddDialogOpen] = useState(false); // Called unconditionally
   const {
     myIndividualTravels,
     myGroups,
@@ -29,45 +29,52 @@ export default function MyTravelsPage() {
     loadingProperties,
     saveTravelPlan,
     fetchMyIndividualTravels,
-    // Removed triggerDestinationMatching and matchingStatus
-  } = useTravelData();
+  } = useTravelData(); // Called unconditionally
 
-  // --- Render Logic ---
-  if (authLoading || loadingProperties) {
+  // --- Redirect Effect ---
+  // Place useEffect after all hook calls
+  useEffect(() => {
+    if (!authLoading && !isAuthenticated) {
+      // console.log("MyTravelsPage: Redirecting to login (useEffect)");
+      router.push('/login');
+    }
+  }, [authLoading, isAuthenticated, router]);
+
+  // --- Loading State Check ---
+  // Place checks after all hook calls
+  if (authLoading || loadingProperties || loadingTravels || loadingGroups) {
+    // console.log("MyTravelsPage: Showing loading indicator", { authLoading, loadingProperties, loadingTravels, loadingGroups });
     return (
       <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
         <Loader2 className="h-16 w-16 animate-spin text-primary" />
-        <p className="ml-3 text-muted-foreground">Loading essential data...</p>
+        <p className="ml-3 text-muted-foreground">Loading travel data...</p>
       </div>
     );
   }
 
-   // Redirect unauthenticated users
-   useEffect(() => {
-        if (!authLoading && !isAuthenticated) {
-            router.push('/login');
-        }
-    }, [authLoading, isAuthenticated, router]);
-
-
+  // --- Authentication Guard (after loading) ---
+  // Check authentication *after* loading is complete and *after* all hooks are called
   if (!isAuthenticated) {
+     // This indicates the redirect effect hasn't completed yet or failed.
+     // Render a loading state or null while redirecting happens.
+    // console.log("MyTravelsPage: Not authenticated, showing redirect indicator");
     return (
        <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
            <Loader2 className="h-16 w-16 animate-spin text-primary" />
-           <p className="ml-3 text-muted-foreground">Redirecting to login...</p>
+           <p className="ml-3 text-muted-foreground">Redirecting...</p>
        </div>
-   ); // Render loading indicator while redirecting
+    );
   }
 
-  // --- Success Handlers for Save ---
+  // --- Component Logic and Render (only if authenticated and not loading) ---
+
+  // Success Handlers for Save
   const handleSaveSuccess = (savedTravel: Travel | null) => {
       setIsAddDialogOpen(false);
       if (savedTravel && savedTravel.id) {
           fetchMyIndividualTravels(); // Refresh list after successful save & match initiation
-          // No explicit toast here, as useTravelData handles it
-          // TODO: Consider navigation after matching completes, perhaps via a listener or state update
-          // Example: router.push(`/my-travels/${savedTravel.id}/results`); // Needs results page
           console.log(`Individual travel ${savedTravel.id} saved, matching initiated.`);
+          // Toast is handled in useTravelData
       } else {
           console.warn("Save succeeded but travel data or ID missing.");
       }
@@ -76,10 +83,9 @@ export default function MyTravelsPage() {
    const handleSaveGroupSuccess = (savedTravel: Travel | null) => {
      setIsAddDialogOpen(false);
      if (savedTravel && savedTravel.id) {
-         // No explicit toast here, as useTravelData handles it
          console.log(`Group travel ${savedTravel.id} saved, matching initiated.`);
-         // Navigate to groups page immediately after saving a group trip
-         router.push('/groups');
+         // Toast is handled in useTravelData
+         router.push('/groups'); // Navigate immediately for group trips
          toast({ title: "Group Trip Saved", description: "Matching initiated. View details on the Groups page." });
      } else {
           console.warn("Group save succeeded but travel data or ID missing.");
@@ -88,18 +94,18 @@ export default function MyTravelsPage() {
 
 
   const handleSaveError = (error: Error) => {
-     // Toast is handled within useTravelData hook now
      console.error("Save error reported to page:", error.message);
-     // No need for toast here, handled in the hook
+     // Toast handled in useTravelData
   };
 
+  // console.log("MyTravelsPage: Rendering main content", { myIndividualTravels });
 
   return (
     <TooltipProvider>
       <div className="container mx-auto py-12 px-4">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-bold flex items-center gap-2">
-            <User className="h-8 w-8 text-primary" /> My Travels
+            <User className="h-8 w-8 text-primary" /> My Individual Travels
           </h1>
           <Button onClick={() => setIsAddDialogOpen(true)}>
             <PlusCircle className="mr-2 h-4 w-4" /> Plan New Trip
@@ -108,26 +114,21 @@ export default function MyTravelsPage() {
              isOpen={isAddDialogOpen}
              setIsOpen={setIsAddDialogOpen}
              groups={myGroups}
-             loadingGroups={loadingGroups}
-             onSave={saveTravelPlan} // Pass the modified save function
-             onSaveSuccess={handleSaveSuccess} // Pass the specific handler
-             onSaveGroupSuccess={handleSaveGroupSuccess} // Pass the specific handler
+             loadingGroups={loadingGroups} // Pass loading state
+             onSave={saveTravelPlan}
+             onSaveSuccess={handleSaveSuccess}
+             onSaveGroupSuccess={handleSaveGroupSuccess}
              onSaveError={handleSaveError}
            />
         </div>
 
         {/* Display User's Individual Travels */}
-        {loadingTravels ? (
-          <div className="text-center py-12">
-            <Loader2 className="h-12 w-12 animate-spin text-primary mx-auto" />
-            <p className="mt-4 text-muted-foreground">Loading your travel plans...</p>
-          </div>
-        ) : myIndividualTravels.length === 0 ? (
+        {myIndividualTravels.length === 0 ? (
           <Card className="text-center py-12 shadow-md">
             <CardHeader>
               <PlaneTakeoff className="h-16 w-16 mx-auto text-muted-foreground mb-4" />
               <CardTitle>No Individual Trips Planned Yet</CardTitle>
-              <CardDescription>Start planning your next solo adventure or a trip with friends!</CardDescription>
+              <CardDescription>Start planning your next solo adventure!</CardDescription>
             </CardHeader>
             <CardContent>
               <Button onClick={() => setIsAddDialogOpen(true)}>
@@ -146,8 +147,7 @@ export default function MyTravelsPage() {
                 <TravelCard
                   key={travel.id}
                   travel={travel}
-                  // Removed onTriggerMatch and matchingStatus props
-                  allProperties={allProperties} // Pass allProperties
+                  allProperties={allProperties}
                   currentUserId={user?.uid || null}
                 />
               );
