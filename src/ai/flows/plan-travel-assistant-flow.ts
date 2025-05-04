@@ -20,12 +20,9 @@ const ChatMessageSchema = z.object({
 
 // Define the schema for the extracted travel data - Simplified (No Dates/Duration)
 const ExtractedTravelDataSchema = z.object({
-    mood: z.string().optional().describe('The desired mood for the trip (e.g., relaxed, adventurous, cultural).'),
-    activity: z.string().optional().describe('The main activity planned (e.g., hiking, museums, beach).'),
+    mood: z.string().optional().describe('The desired mood for the trip (e.g., relaxed, adventurous, cultural). Must be one of the allowed values if specified.'),
+    activity: z.string().optional().describe('The main activity planned (e.g., hiking, museums, beach). Must be one of the allowed values or "other" if specified.'),
     activityOther: z.string().optional().describe('Specific description if the activity is "other".'),
-    // Removed durationDays
-    // Removed startDate
-    // Removed endDate
 }).optional();
 
 
@@ -55,14 +52,21 @@ const planTravelPrompt = ai.definePrompt({
     schema: PlanTravelAssistantInputSchema,
   },
   output: {
+    // IMPORTANT: The output schema here defines what the *LLM should return*.
+    // It includes the response AND the extracted data structure.
     schema: PlanTravelAssistantOutputSchema,
   },
   // Use Handlebars templating for the prompt string - Simplified Prompt (No Dates/Duration)
+  // Ensure the prompt explicitly lists the allowed values for mood and activity.
   prompt: `You are a friendly and slightly dreamy AI travel assistant for OnlyFly. Your goal is to help users plan their trips by having a natural conversation. Engage the user with evocative questions to understand their desired mood and activities, but keep the conversation flowing naturally. You do NOT need to ask about dates or duration.
 
+Allowed Moods: relaxed, adventurous, cultural, social, nature
+Allowed Activities: hiking, museums, beach, nightlife, foodie, other
+
 Here are some examples of evocative questions you can adapt:
-- Mood: "If your heart could take flight, where would it soar? Towards relaxation, adventure, or cultural discovery?"
-- Activity: "Picture your perfect day on this trip. What fills the frame?" (If they say 'other', ask: "Could you capture that in a single word?")
+- Mood: "If your heart could take flight, where would it soar? Towards relaxation, adventure, or cultural discovery?" (Ensure response matches allowed moods)
+- Activity: "Picture your perfect day on this trip. What fills the frame?" (Ensure response matches allowed activities or 'other')
+- If Activity is 'other': "Could you capture that in a single word or short phrase?" (This will populate activityOther)
 
 Based on the entire conversation history below, respond to the latest user message. Try to extract the user's preferences (mood, activity, activityOther if applicable) as you chat.
 
@@ -73,8 +77,13 @@ Conversation History:
 user: {{{userPrompt}}}
 
 Your task:
-1.  Generate a natural, friendly, and slightly evocative response to the user's latest message (userPrompt).
-2.  Analyze the conversation (including the latest userPrompt) and extract the key travel preferences: mood, activity (and activityOther if applicable). If a preference isn't clear, leave the corresponding field empty in extractedData.`,
+1. Generate a natural, friendly, and slightly evocative response to the user's latest message (userPrompt).
+2. Analyze the conversation (including the latest userPrompt) and extract the key travel preferences: mood, activity (and activityOther if applicable).
+   - The extracted 'mood' MUST be one of: relaxed, adventurous, cultural, social, nature.
+   - The extracted 'activity' MUST be one of: hiking, museums, beach, nightlife, foodie, other.
+   - If activity is 'other', also extract 'activityOther'.
+   - If a preference isn't clearly stated or doesn't match the allowed values, leave the corresponding field empty in extractedData.
+3. Return BOTH the response text and the extractedData object according to the output schema.`,
 });
 
 
@@ -97,6 +106,8 @@ const planTravelAssistantFlow = ai.defineFlow<
      if (!output) {
       throw new Error('AI failed to generate a response.');
     }
+    // Log the extracted data for debugging
+     console.log("AI Flow Extracted Data:", output.extractedData);
     return output;
   }
 );

@@ -12,10 +12,16 @@ const Tooltip = TooltipPrimitive.Root
 
 const TooltipTrigger = TooltipPrimitive.Trigger
 
+// Explicitly type the props to match Radix Tooltip Content props
+type TooltipContentProps = React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content> & {
+    // No additional props needed currently, but defining allows extension
+};
+
+
 const TooltipContent = React.forwardRef<
   React.ElementRef<typeof TooltipPrimitive.Content>,
-  React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+  TooltipContentProps // Use the defined type
+>(({ className, sideOffset = 4, children, ...props }, ref) => ( // Destructure children explicitly
   <TooltipPrimitive.Content
     ref={ref}
     sideOffset={sideOffset}
@@ -24,7 +30,9 @@ const TooltipContent = React.forwardRef<
       className
     )}
     {...props}
-  />
+  >
+    {children} {/* Render children explicitly */}
+   </TooltipPrimitive.Content>
 ))
 TooltipContent.displayName = TooltipPrimitive.Content.displayName
 

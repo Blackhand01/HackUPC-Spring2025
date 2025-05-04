@@ -1,6 +1,5 @@
 // src/types/index.ts
 import { Timestamp } from 'firebase/firestore';
-// Removed import for EnrichedDestination as matching is temporarily disabled
 
 // Review Interface
 export interface Review {
@@ -14,29 +13,24 @@ export interface Review {
   createdAt: Timestamp;
 }
 
-// Place Interface (Used within Travel)
+// Place Interface (Used within Travel) - Coordinates are optional
 export interface Place {
   name: string;
-  coordinate?: { lat: number | null; lng: number | null };
+  coordinate?: { lat: number | null; lng: number | null }; // Make coordinates optional
   country: string;
 }
 
-// Travel Interface - Simplified (No dates/duration, no matching fields)
+// Travel Interface - Simplified
 export interface Travel {
   id?: string; // Firestore document ID
   groupId: string | null;
   userId: string | null;
   departureCity: string;
+  departureCityIata?: string | null; // IATA code for departure city (optional)
   preferences: string[]; // e.g., ["mood:relaxed", "activity:beach"]
   places?: Place[]; // Candidate or selected places
   createdAt: Timestamp;
   updatedAt?: Timestamp;
-  // Removed dateRange
-  // Removed durationDays
-  // Removed destinationMatches
-  // Removed destinationMatchesStatus
-  // Removed destinationMatchesError
-  // Removed lastMatchedAt
 }
 
 // Group Interface
@@ -72,6 +66,13 @@ export interface Property {
     order: number;
     storagePath: string | null; // Store Firebase Storage path here
   }[];
+}
+
+// Chat Message Interface (for AI Chat)
+export interface ChatMessage {
+  sender: 'user' | 'ai';
+  message: string;
+  timestamp: number;
 }
 
 // --- You can add more shared types here as needed ---
