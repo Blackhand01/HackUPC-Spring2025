@@ -3,6 +3,7 @@
 
 import { useState, useCallback, useEffect } from 'react';
 import { useWatch } from 'react-hook-form';
+import { useRouter } from 'next/navigation'; // Import useRouter
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Form } from '@/components/ui/form';
@@ -19,9 +20,9 @@ interface CreateTravelDialogProps {
   setIsOpen: (open: boolean) => void;
   groups: Group[];
   loadingGroups: boolean;
-  onSave: (data: TravelFormValues, preferences: string[]) => Promise<Travel>;
-  onSaveSuccess: (travel: Travel) => void;
-  onSaveGroupSuccess: (travel: Travel) => void; // Specific handler for group success
+  onSave: (data: TravelFormValues, preferences: string[]) => Promise<Travel | null>; // Updated return type
+  onSaveSuccess: (travel: Travel | null) => void; // Allow null
+  onSaveGroupSuccess: (travel: Travel | null) => void; // Allow null
   onSaveError: (error: Error) => void;
 }
 
@@ -36,50 +37,40 @@ export function CreateTravelDialog({
   onSaveError,
 }: CreateTravelDialogProps) {
   const form = useTravelForm();
+  const router = useRouter(); // Initialize router
   const [isSubmitting, setIsSubmitting] = useState(false);
-   // State to hold preferences extracted *specifically* from AI mode
    const [aiExtractedPreferences, setAiExtractedPreferences] = useState<string[]>([]);
 
-   // Watch form values needed for button logic and preference extraction
    const watchedValues = useWatch({ control: form.control });
    const planningMode = watchedValues.planningMode;
    const tripType = watchedValues.tripType;
    const departureCity = watchedValues.departureCity;
    const groupId = watchedValues.groupId;
-   const mood = watchedValues.mood; // For Guided mode check
-   const activity = watchedValues.activity; // For Guided mode check
-   const activityOther = watchedValues.activityOther; // For Guided mode check
-   const tripDateStart = watchedValues.tripDateStart; // Watch dates
-   const tripDateEnd = watchedValues.tripDateEnd; // Watch dates
+   const mood = watchedValues.mood;
+   const activity = watchedValues.activity;
+   const activityOther = watchedValues.activityOther;
+   const tripDateStart = watchedValues.tripDateStart;
+   const tripDateEnd = watchedValues.tripDateEnd;
 
-    // --- Determine if Save button should be enabled ---
     const checkCanSave = useCallback((): boolean => {
-        // Basic required fields: departure city and group selection (if group trip)
         if (!departureCity?.trim() || (tripType === 'group' && !groupId)) {
             return false;
         }
-
-        // Need either dates or duration (if duration field exists)
-        // Currently only dates: Check if both dates are present
          if (!tripDateStart || !tripDateEnd) {
              return false;
          }
 
-
-        // Preference check based on mode
         if (planningMode === 'guided') {
             const isActivityValid = activity === 'other' ? !!activityOther?.trim() : !!activity;
             return !!mood || isActivityValid;
         } else if (planningMode === 'ai') {
-            // For AI mode, check if preferences have been extracted (use state)
             return aiExtractedPreferences.length > 0;
         }
-        return false; // Should not happen
+        return false;
     }, [departureCity, tripType, groupId, planningMode, mood, activity, activityOther, tripDateStart, tripDateEnd, aiExtractedPreferences]);
 
     const canSave = checkCanSave();
 
-   // Function to extract preferences based on current form state *for Guided Mode*
    const extractGuidedPreferences = useCallback(() => {
        const prefs: string[] = [];
        const currentMood = form.getValues('mood');
@@ -94,7 +85,7 @@ export function CreateTravelDialog({
        } else if (currentActivity && currentActivity !== 'other') {
            prefs.push(`activity:${currentActivity}`);
        }
-       console.log("Extracting Guided Preferences on Submit:", prefs); // Debug log
+       console.log("Extracting Guided Preferences on Submit:", prefs);
        return prefs;
    }, [form]);
 
@@ -102,35 +93,45 @@ export function CreateTravelDialog({
   const handleFormSubmit = async (data: TravelFormValues) => {
       setIsSubmitting(true);
 
-      // Determine which preferences to use based on the mode
       const currentPrefs = planningMode === 'ai' ? aiExtractedPreferences : extractGuidedPreferences();
 
-       // Validate preferences again right before saving
        if (currentPrefs.length === 0) {
            onSaveError(new Error(`Please set mood/activity preferences using the ${planningMode === 'ai' ? 'AI Assistant' : 'Guided sliders'}.`));
            setIsSubmitting(false);
            return;
        }
-        // Validate dates again
         if (!data.tripDateStart || !data.tripDateEnd) {
            onSaveError(new Error('Please select both a start and end date.'));
            setIsSubmitting(false);
            return;
         }
 
-
-       console.log("Submitting with preferences:", currentPrefs); // Debug log
+       console.log("Submitting with preferences:", currentPrefs);
 
       try {
-          const savedTravel = await onSave(data, currentPrefs); // Pass form data and the correct preferences
-           if (savedTravel.groupId) {
-             onSaveGroupSuccess(savedTravel);
-           } else {
-             onSaveSuccess(savedTravel);
-           }
-          form.reset(); // Reset form on successful save
-          setAiExtractedPreferences([]); // Clear extracted AI prefs
+          const savedTravel = await onSave(data, currentPrefs); // Call the modified onSave
+
+          if (savedTravel) { // Check if save was successful
+            // Call appropriate success handler
+            if (savedTravel.groupId) {
+              onSaveGroupSuccess(savedTravel); // Handles navigation for group trips
+            } else {
+              onSaveSuccess(savedTravel); // Handles individual trip updates
+              // Optional: Navigate after individual save & match initiation
+              // router.push(`/my-travels/${savedTravel.id}/results`); // Uncomment if a results page exists
+            }
+            form.reset();
+            setAiExtractedPreferences([]);
+            setIsOpen(false); // Close dialog on success
+          } else {
+             // Handle case where saveTravelPlan returned null (error handled in hook)
+             console.log("Save operation did not return valid travel data.");
+             // No need to call onSaveError here, it's handled in the hook
+          }
       } catch (error) {
+            // This catch block might be redundant if useTravelData handles errors,
+            // but kept for safety.
+          console.error("Error during form submission process:", error);
           onSaveError(error instanceof Error ? error : new Error('An unknown error occurred'));
       } finally {
           setIsSubmitting(false);
@@ -143,7 +144,7 @@ export function CreateTravelDialog({
         <DialogHeader>
           <DialogTitle className="text-2xl">Plan Your Next Adventure</DialogTitle>
           <DialogDescription>
-            Tell us about your dream trip. Select type, departure, dates and preferences.
+            Tell us about your dream trip. Select type, departure, dates and preferences. Matching will start automatically.
           </DialogDescription>
         </DialogHeader>
 
@@ -162,22 +163,20 @@ export function CreateTravelDialog({
 
             <DepartureCityInput control={form.control} disabled={isSubmitting} />
 
-             {/* PlanningModeTabs now contains GuidedMode which includes the DatePicker */}
              <PlanningModeTabs
                form={form}
                isSubmitting={isSubmitting}
-               onPreferencesExtracted={setAiExtractedPreferences} // Pass callback to update AI prefs state
+               onPreferencesExtracted={setAiExtractedPreferences}
              />
-
 
             <DialogFooter>
               <Button type="button" variant="outline" onClick={() => setIsOpen(false)} disabled={isSubmitting}>Cancel</Button>
                <Button
                   type="submit"
-                  disabled={isSubmitting || !canSave} // Use the calculated canSave state
+                  disabled={isSubmitting || !canSave}
                 >
                   {isSubmitting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                  {isSubmitting ? 'Saving...' : 'Save Travel Plan'}
+                  {isSubmitting ? 'Saving & Matching...' : 'Save & Find Matches'}
               </Button>
             </DialogFooter>
           </form>

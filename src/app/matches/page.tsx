@@ -3,7 +3,7 @@
 
 import { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'next/navigation'; // Import useRouter
 import { Button } from '@/components/ui/button';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent } from '@/components/ui/card';
 import { Loader2, PlusCircle, User, PlaneTakeoff } from 'lucide-react';
@@ -11,25 +11,25 @@ import { useToast } from '@/hooks/use-toast';
 import { useTravelData } from '@/hooks/matches/useTravelData';
 import { CreateTravelDialog } from '@/components/matches/CreateTravelDialog';
 import { TravelCard } from '@/components/matches/TravelCard';
-import { TooltipProvider } from '@/components/ui/tooltip'; // Ensure TooltipProvider wraps the component
+import { TooltipProvider } from '@/components/ui/tooltip';
+import { type Travel } from '@/types'; // Import Travel type
 
 export default function MyTravelsPage() {
-  const { user, isAuthenticated, loading: authLoading } = useAuth(); // Get user object
-  const router = useRouter();
+  const { user, isAuthenticated, loading: authLoading } = useAuth();
+  const router = useRouter(); // Initialize useRouter
   const { toast } = useToast();
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
 
   const {
     myIndividualTravels,
     myGroups,
-    allProperties, // Get all properties
+    allProperties,
     loadingTravels,
     loadingGroups,
     loadingProperties,
     saveTravelPlan,
-    triggerDestinationMatching,
     fetchMyIndividualTravels,
-    matchingStatus, // Get matching status from hook
+    // Removed triggerDestinationMatching and matchingStatus
   } = useTravelData();
 
   // --- Render Logic ---
@@ -42,41 +42,55 @@ export default function MyTravelsPage() {
     );
   }
 
-  if (!authLoading && !isAuthenticated) {
-    router.push('/login');
+   // Redirect unauthenticated users
+   useEffect(() => {
+        if (!authLoading && !isAuthenticated) {
+            router.push('/login');
+        }
+    }, [authLoading, isAuthenticated, router]);
+
+
+  if (!isAuthenticated) {
     return (
        <div className="flex items-center justify-center min-h-[calc(100vh-theme(spacing.14)*2)]">
            <Loader2 className="h-16 w-16 animate-spin text-primary" />
            <p className="ml-3 text-muted-foreground">Redirecting to login...</p>
        </div>
-   );
+   ); // Render loading indicator while redirecting
   }
 
-  const handleSaveSuccess = () => {
-    setIsAddDialogOpen(false);
-    fetchMyIndividualTravels(); // Refresh list
-     toast({
-        title: 'Travel Plan Added!',
-        description: `Your new travel plan has been saved.`,
-      });
+  // --- Success Handlers for Save ---
+  const handleSaveSuccess = (savedTravel: Travel | null) => {
+      setIsAddDialogOpen(false);
+      if (savedTravel && savedTravel.id) {
+          fetchMyIndividualTravels(); // Refresh list after successful save & match initiation
+          // No explicit toast here, as useTravelData handles it
+          // TODO: Consider navigation after matching completes, perhaps via a listener or state update
+          // Example: router.push(`/my-travels/${savedTravel.id}/results`); // Needs results page
+          console.log(`Individual travel ${savedTravel.id} saved, matching initiated.`);
+      } else {
+          console.warn("Save succeeded but travel data or ID missing.");
+      }
   };
 
-   const handleSaveGroupSuccess = () => {
+   const handleSaveGroupSuccess = (savedTravel: Travel | null) => {
      setIsAddDialogOpen(false);
-     toast({
-        title: 'Group Trip Added',
-        description: 'The new trip plan is now associated with the group. View it on the Groups page.',
-      });
-     router.push('/groups');
+     if (savedTravel && savedTravel.id) {
+         // No explicit toast here, as useTravelData handles it
+         console.log(`Group travel ${savedTravel.id} saved, matching initiated.`);
+         // Navigate to groups page immediately after saving a group trip
+         router.push('/groups');
+         toast({ title: "Group Trip Saved", description: "Matching initiated. View details on the Groups page." });
+     } else {
+          console.warn("Group save succeeded but travel data or ID missing.");
+     }
    };
 
 
   const handleSaveError = (error: Error) => {
-     toast({
-        variant: 'destructive',
-        title: 'Error Adding Travel',
-        description: `Failed to save your travel plan. ${error.message}`,
-     });
+     // Toast is handled within useTravelData hook now
+     console.error("Save error reported to page:", error.message);
+     // No need for toast here, handled in the hook
   };
 
 
@@ -95,9 +109,9 @@ export default function MyTravelsPage() {
              setIsOpen={setIsAddDialogOpen}
              groups={myGroups}
              loadingGroups={loadingGroups}
-             onSave={saveTravelPlan}
-             onSaveSuccess={handleSaveSuccess}
-             onSaveGroupSuccess={handleSaveGroupSuccess}
+             onSave={saveTravelPlan} // Pass the modified save function
+             onSaveSuccess={handleSaveSuccess} // Pass the specific handler
+             onSaveGroupSuccess={handleSaveGroupSuccess} // Pass the specific handler
              onSaveError={handleSaveError}
            />
         </div>
@@ -124,20 +138,17 @@ export default function MyTravelsPage() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {myIndividualTravels.map((travel) => {
-               // Ensure travel.id exists and is valid before rendering
-               const currentStatus = travel.id ? matchingStatus[travel.id] || 'idle' : 'idle';
                if (!travel.id) {
                    console.warn("Attempting to render TravelCard without a valid ID:", travel);
-                   return null; // Skip rendering if ID is missing
+                   return null;
                }
               return (
                 <TravelCard
                   key={travel.id}
                   travel={travel}
-                  onTriggerMatch={triggerDestinationMatching}
-                  matchingStatus={currentStatus} // Pass the specific status for this travel plan
-                  allProperties={allProperties} // Pass all properties down
-                  currentUserId={user?.uid || null} // Pass current user ID
+                  // Removed onTriggerMatch and matchingStatus props
+                  allProperties={allProperties}
+                  currentUserId={user?.uid || null}
                 />
               );
             })}
@@ -147,3 +158,4 @@ export default function MyTravelsPage() {
     </TooltipProvider>
   );
 }
+

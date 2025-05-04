@@ -5,8 +5,8 @@ import { useState } from 'react';
 import { Card, CardHeader, CardTitle, CardDescription, CardContent, CardFooter } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { User, LocateFixed, Smile, Mountain, Film, Users, Leaf, Utensils, Info, Heart, Search, XCircle, Loader2, CheckCircle, PlaneTakeoff, CalendarDays } from 'lucide-react';
-import { format } from 'date-fns';
+import { User, LocateFixed, Smile, Mountain, Film, Users, Leaf, Utensils, Info, Heart, Search, XCircle, Loader2, CheckCircle, PlaneTakeoff, CalendarDays, Clock } from 'lucide-react'; // Added Clock icon
+import { format, formatDistanceToNow } from 'date-fns';
 import { type Travel, type Property } from '@/types';
 import { type EnrichedDestination } from '@/ai/flows/find-destination-matches-flow';
 import {
@@ -15,27 +15,24 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
   DialogTrigger
 } from "@/components/ui/dialog";
-import { PropertyCard } from './PropertyCard'; // Assuming PropertyCard exists
+import { PropertyCard } from './PropertyCard';
 
 interface TravelCardProps {
   travel: Travel;
-  onTriggerMatch: (travel: Travel) => void;
-  matchingStatus: 'idle' | 'matching' | 'matched' | 'error'; // Receive status
-  allProperties: Property[]; // Receive all properties
-  currentUserId: string | null; // Receive current user ID
+  allProperties: Property[];
+  currentUserId: string | null;
 }
 
-// Helper to parse preferences
+// Helper to parse preferences (same as before)
 const getPreference = (preferences: string[] | undefined, key: string): string | undefined => {
     if (!preferences) return undefined;
     const pref = preferences.find(p => p.startsWith(`${key}:`));
     return pref ? pref.split(':').slice(1).join(':') : undefined;
 };
 
-// Helper to get preference icon
+// Helper to get preference icon (same as before)
 const getPreferenceIcon = (key: string, value: string | undefined): React.ReactNode => {
      if (!value) return null;
     if (key === 'mood') {
@@ -63,47 +60,37 @@ const getPreferenceIcon = (key: string, value: string | undefined): React.ReactN
     return null;
 };
 
-// Helper to get properties in a destination city (excluding current user's)
+// Helper to get properties in a destination city (same as before)
 const getAvailableProperties = (destinationIata: string, allProps: Property[], userId: string | null): Property[] => {
-    if (!userId) return []; // Cannot filter without user ID
-    // Ensure nearestAirportIata is checked correctly
+    if (!userId) return [];
     return allProps.filter(prop => prop.address.nearestAirportIata === destinationIata && prop.hostId !== userId);
 };
 
 
-export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperties, currentUserId }: TravelCardProps) {
+export function TravelCard({ travel, allProperties, currentUserId }: TravelCardProps) {
   const mood = getPreference(travel.preferences, 'mood');
   const activityRaw = getPreference(travel.preferences, 'activity');
   const activityOther = activityRaw?.startsWith('other:') ? activityRaw.substring(6) : undefined;
   const activity = activityOther ? `Other (${activityOther})` : activityRaw;
 
   const formattedCreatedAt = travel.createdAt && typeof travel.createdAt.toDate === 'function'
-    ? format(travel.createdAt.toDate(), "PP")
+    ? formatDistanceToNow(travel.createdAt.toDate(), { addSuffix: true }) // Use relative time
     : 'N/A';
 
-     const formattedStartDate = travel.tripDateStart && typeof travel.tripDateStart.toDate === 'function'
-        ? format(travel.tripDateStart.toDate(), "PP")
-        : null;
-     const formattedEndDate = travel.tripDateEnd && typeof travel.tripDateEnd.toDate === 'function'
-        ? format(travel.tripDateEnd.toDate(), "PP")
-        : null;
+   const formattedStartDate = travel.tripDateStart && typeof travel.tripDateStart.toDate === 'function'
+      ? format(travel.tripDateStart.toDate(), "PP")
+      : null;
+   const formattedEndDate = travel.tripDateEnd && typeof travel.tripDateEnd.toDate === 'function'
+      ? format(travel.tripDateEnd.toDate(), "PP")
+      : null;
 
-    const isMatching = matchingStatus === 'matching';
-    const matchCompleted = matchingStatus === 'matched';
-    const matchError = matchingStatus === 'error';
+    // --- Matching Status based on travel.status ---
+    const isPending = travel.status === 'pending';
+    const isMatching = travel.status === 'matching';
+    const isMatched = travel.status === 'matched';
+    const isError = travel.status === 'error';
 
-   // Determine if matching can be triggered
-   // Use departureCity (name) for the check here, as IATA is added later.
-   const canMatch = !!(
-       travel.departureCity && // Check if departure city name exists
-       travel.preferences && travel.preferences.length > 0 &&
-       formattedStartDate &&
-       formattedEndDate &&
-       !isMatching // Also check if not currently matching
-   );
-
-   const topMatches = travel.matches?.slice(0, 10) || []; // Get top 10 matches
-
+    const topMatches = travel.matches?.slice(0, 10) || []; // Get top 10 matches
 
   return (
     <Card key={travel.id} className="shadow-md hover:shadow-lg transition-shadow duration-300 flex flex-col">
@@ -160,22 +147,25 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
          {/* Destination Matching Section */}
          <div className="pt-4 border-t mt-4">
             <h4 className="text-sm font-semibold mb-2">Destination Matches</h4>
-             {isMatching ? (
+             {isPending ? (
+                  <div className="flex items-center text-sm text-muted-foreground">
+                     <Clock className="mr-2 h-4 w-4" /> Matching pending...
+                 </div>
+             ) : isMatching ? (
                  <div className="flex items-center text-sm text-muted-foreground">
                      <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Searching for matches...
                  </div>
-             ) : matchCompleted ? (
+             ) : isMatched ? (
                   topMatches.length > 0 ? (
                      <div className="space-y-2">
                          {topMatches.map((match, index) => {
-                              // Ensure IATA is available before attempting to find properties
                               const availableProps = match.destinationIata ? getAvailableProperties(match.destinationIata, allProperties, currentUserId) : [];
                               return (
                                 <Dialog key={`${match.destinationIata || `no-iata-${index}`}-${index}`}>
                                     <DialogTrigger asChild>
                                         <button
-                                            className="w-full text-left border p-2 rounded-md hover:bg-accent/50 transition-colors text-sm block"
-                                            disabled={availableProps.length === 0 || !match.destinationIata} // Disable if no properties or no IATA
+                                            className="w-full text-left border p-2 rounded-md hover:bg-accent/50 transition-colors text-sm block disabled:opacity-50 disabled:cursor-not-allowed"
+                                            disabled={availableProps.length === 0 || !match.destinationIata}
                                             title={!match.destinationIata ? "Destination IATA missing" : availableProps.length === 0 ? "No available properties in this destination for swapping" : `View ${availableProps.length} available properties in ${match.destinationCity} (${match.destinationIata})`}
                                         >
                                             <div className="flex justify-between items-center">
@@ -207,6 +197,9 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                                             {availableProps.map(prop => (
                                                 <PropertyCard key={prop.id} property={prop} />
                                             ))}
+                                             {availableProps.length === 0 && (
+                                                <p className="text-muted-foreground col-span-full text-center py-4">No properties available for swap found in this location.</p>
+                                            )}
                                         </div>
                                     </DialogContent>
                                 </Dialog>
@@ -215,43 +208,25 @@ export function TravelCard({ travel, onTriggerMatch, matchingStatus, allProperti
                      </div>
                   ) : (
                       <div className="flex items-center text-sm text-muted-foreground">
-                         <CheckCircle className="mr-2 h-4 w-4 text-green-600" /> Matching complete, but no suitable destinations found based on criteria.
+                         <CheckCircle className="mr-2 h-4 w-4 text-green-600" /> Matching complete, but no suitable destinations found.
                       </div>
                   )
-             ) : matchError ? (
+             ) : isError ? ( // Check for isError
                   <div className="flex items-center text-sm text-destructive">
-                     <XCircle className="mr-2 h-4 w-4" /> Matching failed. {travel.errorDetails || ''}
+                     <XCircle className="mr-2 h-4 w-4" /> Matching failed. {travel.errorDetails || 'Please try saving the plan again.'}
                  </div>
              ) : (
                  <p className="text-sm text-muted-foreground italic">
-                    Click "Find Matches" to start the search.
+                    Unknown matching status.
                  </p>
              )}
          </div>
 
       </CardContent>
-      <CardFooter className="flex justify-end pt-4 border-t gap-2">
-         <Tooltip>
-            <TooltipTrigger asChild>
-                {/* Wrap button in span to allow tooltip when disabled */}
-                <span tabIndex={!canMatch ? 0 : -1}>
-                    <Button
-                        variant="secondary"
-                        size="sm"
-                        onClick={() => onTriggerMatch(travel)}
-                        disabled={!canMatch} // Use calculated canMatch which includes !isMatching
-                        aria-disabled={!canMatch}
-                    >
-                        {isMatching ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Search className="mr-2 h-4 w-4" />}
-                        {isMatching ? 'Matching...' : matchCompleted ? 'Rematch' : 'Find Matches'}
-                    </Button>
-                 </span>
-            </TooltipTrigger>
-             <TooltipContent>
-                <p>{canMatch ? "Find house swap destinations based on these preferences" : isMatching ? "Matching in progress..." : "Matching requires departure city, preferences & dates."}</p>
-            </TooltipContent>
-         </Tooltip>
-      </CardFooter>
+       <CardFooter className="flex justify-end pt-4 border-t">
+           {/* Removed Find Matches Button */}
+           <Button variant="outline" size="sm">View Details</Button> {/* Placeholder */}
+       </CardFooter>
     </Card>
   );
 }

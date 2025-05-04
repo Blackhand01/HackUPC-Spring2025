@@ -32,7 +32,7 @@ export interface Travel {
   tripDateStart: Timestamp; // Required for matching
   tripDateEnd: Timestamp; // Required for matching
   places?: Place[]; // Candidate or selected places
-  status: 'pending' | 'matching' | 'matched' | 'error' | 'booked' | 'archived';
+  status: 'pending' | 'matching' | 'matched' | 'error' | 'booked' | 'archived'; // Ensure 'pending' is included
   matches?: EnrichedDestination[]; // Array to store matching results from AI flow
   errorDetails?: string | null;
   createdAt: Timestamp;
